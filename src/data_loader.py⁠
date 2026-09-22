@@ -1,0 +1,53 @@
+import pandas as pd
+import yfinance as yf
+from datetime import date
+
+def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
+    """
+    Télécharge les données depuis Yahoo Finance.
+    """
+    try:
+        df = yf.download(ticker, start=start_date, end=end_date)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df.reset_index(inplace=True)
+        
+        # Nettoyage
+        if 'Date' in df.columns and 'Close' in df.columns:
+            df = df[['Date', 'Close', 'Open', 'High', 'Low', 'Volume']].dropna()
+            df['Date'] = pd.to_datetime(df['Date'])
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Erreur téléchargement yfinance: {e}")
+        return pd.DataFrame()
+
+def load_data_from_csv(uploaded_file) -> pd.DataFrame:
+    """
+    Charge et nettoie les données à partir d'un fichier CSV exporté (Bourse de Casa / LeBoursier).
+    Format attendu : colonnes comprenant au minimum 'Date' et 'Clôture' ou 'Close'.
+    """
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        # Normalisation des noms de colonnes
+        df.columns = [c.strip().capitalize() for c in df.columns]
+        
+        # Mapping si les noms sont en français (ex: Clôture -> Close)
+        rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close'}
+        df.rename(columns=rename_map, inplace=True)
+
+        if 'Date' in df.columns and 'Close' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            # Traitement si le prix est stocké avec une virgule au lieu d'un point
+            if df['Close'].dtype == object:
+                df['Close'] = df['Close'].str.replace(' ', '').str.replace(',', '.').astype(float)
+            
+            df = df[['Date', 'Close']].dropna()
+            df.sort_values(by='Date', ascending=True, inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Erreur chargement CSV: {e}")
+        return pd.DataFrame()
