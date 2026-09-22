@@ -1,0 +1,55 @@
+ import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from prophet import Prophet
+
+def train_predict_prophet(df: pd.DataFrame, days_to_predict: int):
+    """
+    Entraîne un modèle Prophet et effectue la prédiction pour les N jours à venir.
+    """
+    # Prophet requiert deux colonnes : 'ds' (date) et 'y' (valeur)
+    df_prophet = df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
+    
+    model = Prophet(daily_seasonality=True, yearly_seasonality=True, weekly_seasonality=True)
+    model.fit(df_prophet)
+    
+    future = model.make_future_dataframe(periods=days_to_predict)
+    forecast = model.predict(future)
+    
+    # Extraire uniquement les prédictions futures
+    predictions = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(days_to_predict)
+    predictions.rename(columns={
+        'ds': 'Date',
+        'yhat': 'Prédiction',
+        'yhat_lower': 'Limite_Basse',
+        'yhat_upper': 'Limite_Haute'
+    }, inplace=True)
+    
+    return forecast, predictions
+
+def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
+    """
+    Entraîne un modèle Random Forest et prédit les jours futurs.
+    """
+    data = df[['Date', 'Close']].copy()
+    data['Day_Index'] = np.arange(len(data))
+    
+    X = data[['Day_Index']]
+    y = data['Close']
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X, y)
+    
+    last_index = data['Day_Index'].iloc[-1]
+    future_indices = np.array([[last_index + i] for i in range(1, days_to_predict + 1)])
+    preds = model.predict(future_indices)
+    
+    last_date = data['Date'].iloc[-1]
+    future_dates = [last_date + pd.Timedelta(days=i) for i in range(1, days_to_predict + 1)]
+    
+    pred_df = pd.DataFrame({
+        'Date': future_dates,
+        'Prédiction': preds
+    })
+    
+    return pred_df
