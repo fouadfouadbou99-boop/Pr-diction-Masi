@@ -17,27 +17,50 @@ HEADERS = {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Fonctions de Chargement & Scraping Robustes
+# 1. Nettoyage & Alignement des Dates (Correction du décalage)
+# ------------------------------------------------------------------------------
+def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Nettoie, formate et trie chronologiquement les données brutes 
+    du plus ancien au plus récent pour éviter tout décalage temporel.
+    """
+    if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
+        return pd.DataFrame()
+
+    # Normalisation des dates (suppression de la composante horaire)
+    df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce').dt.normalize()
+    
+    # Nettoyage des chaînes numériques si le prix est en texte
+    if df['Close'].dtype == object:
+        df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
+    
+    # Suppression des valeurs nulles et doublons
+    df = df.dropna(subset=['Date', 'Close'])
+    df = df.drop_duplicates(subset=['Date'])
+    
+    # Tri CHRONOLOGIQUE STRICT (Passé -> Présent)
+    df = df.sort_values(by='Date', ascending=True).reset_index(drop=True)
+    return df
+
+# ------------------------------------------------------------------------------
+# 2. Fonctions de Chargement & Scraping
 # ------------------------------------------------------------------------------
 def generate_sample_data() -> pd.DataFrame:
-    """Génère un jeu de données de secours si tous les endpoints échouent."""
+    """Génère un jeu de données de secours si toutes les sources en ligne sont indisponibles."""
     end = date.today()
     start = end - timedelta(days=365)
     dates = pd.date_range(start=start, end=end, freq='B')
     
-    # Simulation de la tendance MASI (autour de 18 000 Pts)
     np.random.seed(42)
     returns = np.random.normal(0.0003, 0.008, len(dates))
     price_path = 18000 * np.exp(np.cumsum(returns))
     
     df = pd.DataFrame({'Date': dates, 'Close': price_path})
-    return df
+    return clean_and_sort_df(df)
 
 @st.cache_data(ttl=1800)
 def scrape_masi_bvc() -> pd.DataFrame:
-    """
-    Scrape l'indice MASI avec plusieurs fallbacks pour garantir la récupération.
-    """
+    """Récupère l'indice MASI avec mécanismes de secours."""
     urls = [
         "https://www.leboursier.ma/index-detail/MASI.html",
         "https://www.casablanca-bourse.com/fr/indices/masi"
@@ -45,7 +68,7 @@ def scrape_masi_bvc() -> pd.DataFrame:
     
     for url in urls:
         try:
-            res = requests.get(url, headers=HEADERS, timeout=7, verify=False)
+            res = requests.get(url, headers=HEADERS, timeout=8, verify=False)
             if res.status_code == 200:
                 tables = pd.read_html(res.text)
                 for df in tables:
@@ -55,31 +78,23 @@ def scrape_masi_bvc() -> pd.DataFrame:
                         rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Valeur': 'Close', 'Séance': 'Date'}
                         df.rename(columns=rename_map, inplace=True)
                         
-                        if 'Date' in df.columns and 'Close' in df.columns:
-                            df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-                            if df['Close'].dtype == object:
-                                df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
-                            
-                            df = df[['Date', 'Close']].dropna().sort_values(by='Date', ascending=True).reset_index(drop=True)
-                            if len(df) > 5:
-                                return df
+                        cleaned = clean_and_sort_df(df)
+                        if len(cleaned) > 5:
+                            return cleaned
         except Exception:
             continue
 
-    # Fallback vers Yahoo Finance (Ticker MASI/Morocco Stock Market)
+    # Fallback Yahoo Finance (^MASI)
     try:
         yf_df = yf.download("^MASI", period="1y")
         if not yf_df.empty:
             if isinstance(yf_df.columns, pd.MultiIndex):
                 yf_df.columns = yf_df.columns.get_level_values(0)
             yf_df.reset_index(inplace=True)
-            yf_df = yf_df[['Date', 'Close']].dropna()
-            yf_df['Date'] = pd.to_datetime(yf_df['Date'])
-            return yf_df.sort_values(by='Date', ascending=True).reset_index(drop=True)
+            return clean_and_sort_df(yf_df)
     except Exception:
         pass
 
-    # Si tous les serveurs échouent, on génère un jeu de données de secours
     return generate_sample_data()
 
 def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
@@ -88,13 +103,7 @@ def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df.reset_index(inplace=True)
-        
-        if 'Date' in df.columns and 'Close' in df.columns:
-            df = df[['Date', 'Close']].dropna()
-            df['Date'] = pd.to_datetime(df['Date'])
-            df = df.sort_values(by='Date', ascending=True).reset_index(drop=True)
-            return df
-        return pd.DataFrame()
+        return clean_and_sort_df(df)
     except Exception as e:
         st.error(f"Erreur Yahoo Finance : {e}")
         return pd.DataFrame()
@@ -107,29 +116,20 @@ def load_data_from_file(uploaded_file) -> pd.DataFrame:
         elif filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(uploaded_file)
         else:
-            st.error("Format non supporté.")
+            st.error("Format non pris en charge.")
             return pd.DataFrame()
 
         df.columns = [c.strip().capitalize() for c in df.columns]
         rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Valeur': 'Close'}
         df.rename(columns=rename_map, inplace=True)
 
-        if 'Date' in df.columns and 'Close' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            if df['Close'].dtype == object:
-                df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
-            
-            df = df[['Date', 'Close']].dropna().sort_values(by='Date', ascending=True).reset_index(drop=True)
-            return df
-        else:
-            st.error("Colonnes 'Date' et 'Close' introuvables dans le fichier.")
-            return pd.DataFrame()
+        return clean_and_sort_df(df)
     except Exception as e:
-        st.error(f"Erreur d'importation : {e}")
+        st.error(f"Erreur lors de la lecture du fichier : {e}")
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 2. Algorithme de Prédiction
+# 3. Algorithme de Prédiction Alignée sur les Jours Ouvrés
 # ------------------------------------------------------------------------------
 def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     data = df[['Date', 'Close']].copy()
@@ -142,17 +142,19 @@ def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     model.fit(X, y)
     
     last_index = data['Day_Index'].iloc[-1]
-    future_indices = np.array([[last_index + i] for i in range(1, days_to_predict + 1)])
-    preds = model.predict(future_indices)
-    
     last_date = data['Date'].iloc[-1]
-    future_dates = [last_date + pd.Timedelta(days=i) for i in range(1, days_to_predict + 1)]
+    
+    # Projection exclusive sur les jours ouvrés boursiers (Business Days)
+    future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=days_to_predict, freq='B')
+    
+    future_indices = np.array([[last_index + i] for i in range(1, len(future_dates) + 1)])
+    preds = model.predict(future_indices)
     
     pred_df = pd.DataFrame({'Date': future_dates, 'Prédiction': preds})
     return pred_df
 
 # ------------------------------------------------------------------------------
-# 3. Interface Utilisateur Streamlit
+# 4. Interface Utilisateur Streamlit
 # ------------------------------------------------------------------------------
 st.set_page_config(page_title="Prédiction MASI — Bourse de Casablanca", page_icon="📈", layout="wide")
 
@@ -189,7 +191,7 @@ else:
 
 # Affichage des graphiques et données
 if not df.empty:
-    st.success(f"Données chargées avec succès ({len(df)} séances boursières)")
+    st.success(f"Données alignées et chargées avec succès ({len(df)} séances boursières)")
     
     tab1, tab2, tab3 = st.tabs(["📊 Graphique", "🤖 Prédiction ML", "📑 Données Brutes"])
     
@@ -202,7 +204,7 @@ if not df.empty:
         
     with tab2:
         st.subheader("Prédiction par Machine Learning (Random Forest)")
-        days_to_predict = st.slider("Nombre de jours à prédire", min_value=1, max_value=60, value=14)
+        days_to_predict = st.slider("Nombre de séances (jours ouvrés) à prédire", min_value=1, max_value=60, value=14)
         
         if st.button("Lancer la prédiction 🚀"):
             with st.spinner("Calcul des prédictions..."):
@@ -216,9 +218,18 @@ if not df.empty:
                 
                 st.write("### Tableau des prédictions")
                 st.dataframe(pred_df, width='stretch')
+                
+                # Option de téléchargement des prédictions
+                csv_data = pred_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Télécharger les prédictions (CSV)",
+                    data=csv_data,
+                    file_name="predictions_masi.csv",
+                    mime="text/csv"
+                )
 
     with tab3:
-        st.subheader("Aperçu des données brutes")
+        st.subheader("Aperçu des données brutes (Triées chronologiquement)")
         st.dataframe(df, width='stretch')
 else:
     st.info("Veuillez sélectionner une source dans le menu de gauche pour afficher les données.")
