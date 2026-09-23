@@ -7,13 +7,14 @@ import urllib3
 import yfinance as yf
 from sklearn.ensemble import RandomForestRegressor
 from datetime import date, timedelta
+import io
 
 # Désactiver les avertissements de certificats SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
 # ------------------------------------------------------------------------------
@@ -24,70 +25,59 @@ def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
         return pd.DataFrame()
 
-    # Normalisation de la date (suppression des heures/timezones)
     df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce').dt.normalize()
     
-    # Nettoyage des chaînes numériques si le prix est au format texte
     if df['Close'].dtype == object:
         df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
     
-    # Suppression des valeurs nulles et doublons
     df = df.dropna(subset=['Date', 'Close'])
     df = df.drop_duplicates(subset=['Date'])
-    
-    # Tri CHRONOLOGIQUE STRICT (Passé -> Présent)
     df = df.sort_values(by='Date', ascending=True).reset_index(drop=True)
     return df
 
+def generate_demo_dataset() -> pd.DataFrame:
+    """Génère un dataset réaliste du MASI pour téléchargement immédiat."""
+    end = date.today()
+    start = end - timedelta(days=365)
+    dates = pd.date_range(start=start, end=end, freq='B')
+    
+    np.random.seed(42)
+    returns = np.random.normal(0.0002, 0.006, len(dates))
+    price_path = 14200 * np.exp(np.cumsum(returns))
+    
+    df = pd.DataFrame({'Date': dates, 'Close': np.round(price_path, 2)})
+    return clean_and_sort_df(df)
+
 # ------------------------------------------------------------------------------
-# 2. Scraping en Direct du MASI Réel
+# 2. Scraping Multi-Source
 # ------------------------------------------------------------------------------
 @st.cache_data(ttl=1800)
 def scrape_masi_bvc() -> pd.DataFrame:
-    """
-    Scrape l'historique réel du MASI via des miroirs financiers non bloqués.
-    """
-    # Source 1 : Ilboursa (Miroir Bourse de Casablanca - Accès libre)
-    try:
-        url = "https://www.ilboursa.com/marches/historiques/MASI.ma"
-        res = requests.get(url, headers=HEADERS, timeout=10, verify=False)
-        if res.status_code == 200:
-            tables = pd.read_html(res.text)
-            for df in tables:
-                cols = [str(c).lower() for c in df.columns]
-                if any('date' in c or 'séance' in c for c in cols):
-                    df.columns = [c.strip().capitalize() for c in df.columns]
-                    
-                    # Mapping des colonnes
-                    rename_map = {
-                        'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 
-                        'Valeur': 'Close', 'Séance': 'Date', 'Fermeture': 'Close'
-                    }
-                    df.rename(columns=rename_map, inplace=True)
-                    
-                    cleaned = clean_and_sort_df(df)
-                    if not cleaned.empty and len(cleaned) > 5:
-                        return cleaned
-    except Exception:
-        pass
-
-    # Source 2 : LeBoursier (Fallback)
-    try:
-        url_alt = "https://www.leboursier.ma/index-detail/MASI.html"
-        res = requests.get(url_alt, headers=HEADERS, timeout=10, verify=False)
-        if res.status_code == 200:
-            tables = pd.read_html(res.text)
-            for df in tables:
-                cols = [str(c).lower() for c in df.columns]
-                if any('date' in c or 'séance' in c for c in cols):
-                    df.columns = [c.strip().capitalize() for c in df.columns]
-                    rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Séance': 'Date'}
-                    df.rename(columns=rename_map, inplace=True)
-                    cleaned = clean_and_sort_df(df)
-                    if not cleaned.empty and len(cleaned) > 5:
-                        return cleaned
-    except Exception:
-        pass
+    """Tente de récupérer le MASI depuis plusieurs miroirs boursiers."""
+    sources = [
+        "https://www.ilboursa.com/marches/historiques/MASI.ma",
+        "https://www.leboursier.ma/index-detail/MASI.html"
+    ]
+    
+    for url in sources:
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=7, verify=False)
+            if res.status_code == 200:
+                tables = pd.read_html(res.text)
+                for df in tables:
+                    cols = [str(c).lower() for c in df.columns]
+                    if any('date' in c or 'séance' in c for c in cols):
+                        df.columns = [c.strip().capitalize() for c in df.columns]
+                        rename_map = {
+                            'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 
+                            'Valeur': 'Close', 'Séance': 'Date', 'Fermeture': 'Close'
+                        }
+                        df.rename(columns=rename_map, inplace=True)
+                        cleaned = clean_and_sort_df(df)
+                        if not cleaned.empty and len(cleaned) > 5:
+                            return cleaned
+        except Exception:
+            continue
 
     return pd.DataFrame()
 
@@ -123,7 +113,7 @@ def load_data_from_file(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 3. Algorithme de Prédiction (Jours Ouvrés Boursiers)
+# 3. Algorithme de Prédiction
 # ------------------------------------------------------------------------------
 def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     data = df[['Date', 'Close']].copy()
@@ -138,9 +128,7 @@ def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     last_index = data['Day_Index'].iloc[-1]
     last_date = data['Date'].iloc[-1]
     
-    # Projection exclusive sur les jours ouvrés boursiers (Business Days)
     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=days_to_predict, freq='B')
-    
     future_indices = np.array([[last_index + i] for i in range(1, len(future_dates) + 1)])
     preds = model.predict(future_indices)
     
@@ -170,6 +158,16 @@ elif source_type == "Fichier local (CSV / Excel)":
     uploaded_file = st.sidebar.file_uploader("Importer un fichier (CSV, XLSX, XLS)", type=["csv", "xlsx", "xls"])
     if uploaded_file is not None:
         df = load_data_from_file(uploaded_file)
+    else:
+        st.sidebar.info("💡 Pas de fichier sous la main ? Téléchargez le modèle ci-dessous :")
+        demo_df = generate_demo_dataset()
+        csv_demo = demo_df.to_csv(index=False).encode('utf-8')
+        st.sidebar.download_button(
+            label="📥 Télécharger Modèle MASI (CSV)",
+            data=csv_demo,
+            file_name="masi_historique_template.csv",
+            mime="text/csv"
+        )
 
 else:
     ticker = st.sidebar.text_input("Ticker Yahoo (ex: ATW.CS pour Attijariwafa)", value="ATW.CS")
@@ -187,7 +185,7 @@ if not df.empty:
     tab1, tab2, tab3 = st.tabs(["📊 Graphique", "🤖 Prédiction ML", "📑 Données Brutes"])
     
     with tab1:
-        st.subheader("Historique des cours réels")
+        st.subheader("Historique des cours")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name="MASI Close", line=dict(color='#0066CC', width=2)))
         fig.update_layout(xaxis_title="Date", yaxis_title="Indice (Pts)", hovermode="x unified")
@@ -202,7 +200,7 @@ if not df.empty:
                 pred_df = train_predict_rf(df, days_to_predict)
                 
                 fig_pred = go.Figure()
-                fig_pred.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name="Historique Réel", line=dict(color='#1C2D42')))
+                fig_pred.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name="Historique", line=dict(color='#1C2D42')))
                 fig_pred.add_trace(go.Scatter(x=pred_df['Date'], y=pred_df['Prédiction'], name="Prédiction RF", line=dict(color='#FF4B4B', dash='dash')))
                 fig_pred.update_layout(xaxis_title="Date", yaxis_title="Indice (Pts)", hovermode="x unified")
                 st.plotly_chart(fig_pred, width='stretch')
@@ -219,8 +217,8 @@ if not df.empty:
                 )
 
     with tab3:
-        st.subheader("Données brutes réelles (Triées chronologiquement)")
+        st.subheader("Données brutes")
         st.dataframe(df, width='stretch')
 
 else:
-    st.error("⚠️ Connexion impossible aux serveurs boursiers direct en ce moment. Veuillez réessayer plus tard ou utiliser le mode 'Fichier local' (CSV/Excel).")
+    st.warning("⚠️ Les serveurs du scraping direct sont temporairement inaccessibles depuis ce cloud. Basculez sur 'Fichier local' dans le menu de gauche et cliquez sur 'Télécharger Modèle MASI' pour tester immédiatement l'application.")
