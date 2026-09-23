@@ -6,3 +6,5 @@ plotly
 yfinance
 requests
 beautifulsoup4
+lxml
+openpyxl
