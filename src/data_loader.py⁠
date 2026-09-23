@@ -1,10 +1,48 @@
 import pandas as pd
 import yfinance as yf
-from datetime import date
+import requests
+from bs4 import BeautifulSoup
+from datetime import date, datetime
+
+def scrape_masi_live() -> pd.DataFrame:
+    """
+    Récupère directement les données récentes du MASI via Web Scraping.
+    """
+    try:
+        url = "https://www.leboursier.ma/index-detail/MASI.html"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Recherche du tableau des valeurs ou données historiques
+            tables = pd.read_html(response.text)
+            for df in tables:
+                # Cherche une table contenant des colonnes de prix/date
+                cols = [str(c).lower() for c in df.columns]
+                if any('date' in c or 'séance' in c for c in cols):
+                    df.columns = [c.strip().capitalize() for c in df.columns]
+                    rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Séance': 'Date'}
+                    df.rename(columns=rename_map, inplace=True)
+                    
+                    if 'Date' in df.columns and 'Close' in df.columns:
+                        df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+                        if df['Close'].dtype == object:
+                            df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
+                        df = df[['Date', 'Close']].dropna().sort_values(by='Date', ascending=True).reset_index(drop=True)
+                        return df
+
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Erreur lors du scraping du MASI: {e}")
+        return pd.DataFrame()
 
 def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
     """
-    Télécharge les données depuis Yahoo Finance.
+    Télécharge les données depuis Yahoo Finance (pour les actions .CS ou indices internationaux).
     """
     try:
         df = yf.download(ticker, start=start_date, end=end_date)
@@ -12,42 +50,35 @@ def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd
             df.columns = df.columns.get_level_values(0)
         df.reset_index(inplace=True)
         
-        # Nettoyage
         if 'Date' in df.columns and 'Close' in df.columns:
-            df = df[['Date', 'Close', 'Open', 'High', 'Low', 'Volume']].dropna()
+            df = df[['Date', 'Close']].dropna()
             df['Date'] = pd.to_datetime(df['Date'])
+            df = df.sort_values(by='Date', ascending=True).reset_index(drop=True)
             return df
         return pd.DataFrame()
     except Exception as e:
-        print(f"Erreur téléchargement yfinance: {e}")
+        print(f"Erreur yfinance: {e}")
         return pd.DataFrame()
 
 def load_data_from_csv(uploaded_file) -> pd.DataFrame:
     """
-    Charge et nettoie les données à partir d'un fichier CSV exporté (Bourse de Casa / LeBoursier).
-    Format attendu : colonnes comprenant au minimum 'Date' et 'Clôture' ou 'Close'.
+    Charge et nettoie les données à partir d'un fichier CSV.
     """
     try:
         df = pd.read_csv(uploaded_file)
-        
-        # Normalisation des noms de colonnes
         df.columns = [c.strip().capitalize() for c in df.columns]
-        
-        # Mapping si les noms sont en français (ex: Clôture -> Close)
         rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close'}
         df.rename(columns=rename_map, inplace=True)
 
         if 'Date' in df.columns and 'Close' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-            # Traitement si le prix est stocké avec une virgule au lieu d'un point
+            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             if df['Close'].dtype == object:
-                df['Close'] = df['Close'].str.replace(' ', '').str.replace(',', '.').astype(float)
+                df['Close'] = df['Close'].astype(str).str.replace(' ', '').str.replace(',', '.').astype(float)
             
             df = df[['Date', 'Close']].dropna()
-            df.sort_values(by='Date', ascending=True, inplace=True)
-            df.reset_index(drop=True, inplace=True)
+            df = df.sort_values(by='Date', ascending=True).reset_index(drop=True)
             return df
         return pd.DataFrame()
     except Exception as e:
-        print(f"Erreur chargement CSV: {e}")
+        print(f"Erreur CSV: {e}")
         return pd.DataFrame()
