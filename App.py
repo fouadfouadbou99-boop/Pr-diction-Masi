@@ -2,26 +2,24 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import requests
-import urllib3
 import yfinance as yf
 from sklearn.ensemble import RandomForestRegressor
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+from bs4 import BeautifulSoup
 
-# Désactiver les avertissements liés aux certificats SSL
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "X-Requested-With": "XMLHttpRequest"
-}
+# Import de curl_cffi pour contourner la protection Cloudflare / Bot detection
+try:
+    from curl_cffi import requests as curl_requests
+    HAS_CURL_CFFI = True
+except ImportError:
+    import requests as curl_requests
+    HAS_CURL_CFFI = False
 
 # ------------------------------------------------------------------------------
 # 1. Nettoyage & Alignement des Dates
 # ------------------------------------------------------------------------------
 def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Nettoie et trie les données chronologiquement."""
+    """Nettoie et trie les données chronologiquement (anciennes -> récentes)."""
     if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
         return pd.DataFrame()
 
@@ -36,17 +34,22 @@ def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ------------------------------------------------------------------------------
-# 2. Récupération Directe de la Data Réelle du MASI
+# 2. Scraping Anti-Cloudflare & API Directes
 # ------------------------------------------------------------------------------
 @st.cache_data(ttl=1800)
 def scrape_masi_bvc() -> pd.DataFrame:
     """
-    Récupère l'historique réel du MASI via scraping et endpoints API.
+    Récupère la data réelle du MASI en simulant l'empreinte TLS d'un navigateur Chrome.
     """
-    # Source 1 : Scraping LeBoursier / LeMatin Bourse
+    # Option A: Contournement Cloudflare sur LeBoursier via impersonation Chrome
     try:
         url = "https://www.leboursier.ma/index-detail/MASI.html"
-        res = requests.get(url, headers=HEADERS, timeout=10, verify=False)
+        if HAS_CURL_CFFI:
+            res = curl_requests.get(url, impersonate="chrome120", timeout=12)
+        else:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            res = curl_requests.get(url, headers=headers, timeout=12, verify=False)
+            
         if res.status_code == 200:
             tables = pd.read_html(res.text)
             for df in tables:
@@ -59,21 +62,44 @@ def scrape_masi_bvc() -> pd.DataFrame:
                     cleaned = clean_and_sort_df(df)
                     if not cleaned.empty and len(cleaned) > 5:
                         return cleaned
-    except Exception as e:
-        st.error(f"Erreur lors de la tentative de scraping LeBoursier : {e}")
+    except Exception:
+        pass
 
-    # Source 2 : Endpoint API BVC / Medias24
+    # Option B: Reconstitution via l'API Medias24 / LeBoursier
     try:
         api_url = "https://www.medias24.com/content/api/bourse/index/MASI/history"
-        res = requests.get(api_url, headers=HEADERS, timeout=10, verify=False)
+        if HAS_CURL_CFFI:
+            res = curl_requests.get(api_url, impersonate="chrome120", timeout=10)
+        else:
+            res = curl_requests.get(api_url, timeout=10, verify=False)
+            
         if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data)
-                df.rename(columns={'date': 'Date', 'valeur': 'Close', 'close': 'Close'}, inplace=True)
+            json_data = res.json()
+            if isinstance(json_data, list) and len(json_data) > 0:
+                df = pd.DataFrame(json_data)
+                df.rename(columns={'date': 'Date', 'valeur': 'Close', 'close': 'Close', 'c': 'Close', 'd': 'Date'}, inplace=True)
                 cleaned = clean_and_sort_df(df)
                 if not cleaned.empty:
                     return cleaned
+    except Exception:
+        pass
+
+    # Option C: Extraction directe Bourse de Casablanca avec contournement TLS
+    try:
+        bvc_url = "https://www.casablanca-bourse.com/fr/indices/masi"
+        if HAS_CURL_CFFI:
+            res = curl_requests.get(bvc_url, impersonate="chrome120", timeout=12)
+            if res.status_code == 200:
+                tables = pd.read_html(res.text)
+                for df in tables:
+                    cols = [str(c).lower() for c in df.columns]
+                    if any('date' in c or 'séance' in c for c in cols):
+                        df.columns = [c.strip().capitalize() for c in df.columns]
+                        rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Valeur': 'Close', 'Séance': 'Date'}
+                        df.rename(columns=rename_map, inplace=True)
+                        cleaned = clean_and_sort_df(df)
+                        if not cleaned.empty and len(cleaned) > 5:
+                            return cleaned
     except Exception:
         pass
 
@@ -111,7 +137,7 @@ def load_data_from_file(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 3. Algorithme de Prédiction
+# 3. Algorithme de Prédiction (Business Days)
 # ------------------------------------------------------------------------------
 def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     data = df[['Date', 'Close']].copy()
@@ -143,13 +169,13 @@ st.title("📈 Prédiction Boursière MASI — Bourse de Casablanca")
 st.sidebar.header("⚙️ Source de Données")
 source_type = st.sidebar.radio(
     "Choisir la source :",
-    ["Bourse de Casablanca (Direct)", "Fichier local (CSV / Excel)", "Yahoo Finance (Actions)"]
+    ["Bourse de Casablanca (Scraping Anti-Blocage)", "Fichier local (CSV / Excel)", "Yahoo Finance"]
 )
 
 df = pd.DataFrame()
 
-if source_type == "Bourse de Casablanca (Direct)":
-    with st.spinner("Récupération de la data réelle du MASI..."):
+if source_type == "Bourse de Casablanca (Scraping Anti-Blocage)":
+    with st.spinner("Bypass des protections & chargement du MASI en direct..."):
         df = scrape_masi_bvc()
 
 elif source_type == "Fichier local (CSV / Excel)":
@@ -158,7 +184,7 @@ elif source_type == "Fichier local (CSV / Excel)":
         df = load_data_from_file(uploaded_file)
 
 else:
-    ticker = st.sidebar.text_input("Ticker Yahoo (ex: ATW.CS pour Attijariwafa, IAM.CS pour Maroc Telecom)", value="ATW.CS")
+    ticker = st.sidebar.text_input("Ticker Yahoo (ex: ATW.CS pour Attijariwafa)", value="ATW.CS")
     col1, col2 = st.sidebar.columns(2)
     start_date = col1.date_input("Début", date.today() - timedelta(days=365*2))
     end_date = col2.date_input("Fin", date.today())
@@ -168,14 +194,14 @@ else:
 
 # Affichage des données
 if not df.empty:
-    st.success(f"Données réelles chargées avec succès ({len(df)} séances boursières). Dernier cours enregistré : **{df['Close'].iloc[-1]:,.2f}** MAD")
+    st.success(f"Données réelles chargées avec succès ({len(df)} séances boursières). Dernier cours : **{df['Close'].iloc[-1]:,.2f}** MAD")
     
-    tab1, tab2, tab3 = st.tabs(["📊 Graphique", "🤖 Prédiction ML", "📑 Données Brutes Réelles"])
+    tab1, tab2, tab3 = st.tabs(["📊 Graphique", "🤖 Prédiction ML", "📑 Données Brutes"])
     
     with tab1:
         st.subheader("Historique des cours réels")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name="Cours / Indice", line=dict(color='#0066CC', width=2)))
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name="MASI Close", line=dict(color='#0066CC', width=2)))
         fig.update_layout(xaxis_title="Date", yaxis_title="Valeur (MAD)", hovermode="x unified")
         st.plotly_chart(fig, width='stretch')
         
@@ -205,8 +231,8 @@ if not df.empty:
                 )
 
     with tab3:
-        st.subheader("Données brutes extraites")
+        st.subheader("Données brutes réelles")
         st.dataframe(df, width='stretch')
 
 else:
-    st.error("⚠️ Impossible d'extraire la data réelle en direct actuellement. Le site source bloque l'accès automatique ou est momentanément indisponible. Veuillez utiliser la fonction 'Fichier local' en important votre propre fichier CSV/Excel téléchargé depuis la Bourse de Casablanca.")
+    st.error("Impossible d'extraire automatiquement la data en direct actuellement. Le serveur source bloque la requête ou nécessite une mise à jour. Veuillez utiliser la fonction 'Fichier local' en important un fichier CSV/Excel.")
