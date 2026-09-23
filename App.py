@@ -3,9 +3,13 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import requests
+import urllib3
 import yfinance as yf
 from sklearn.ensemble import RandomForestRegressor
 from datetime import date, timedelta
+
+# Désactiver les avertissements liés aux certificats SSL non vérifiés
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ------------------------------------------------------------------------------
 # 1. Fonctions de Chargement & Scraping des Données
@@ -20,7 +24,8 @@ def scrape_masi_live() -> pd.DataFrame:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        # verify=False permet de contourner le problème de certificat SSL
+        response = requests.get(url, headers=headers, timeout=10, verify=False)
         
         if response.status_code == 200:
             tables = pd.read_html(response.text)
