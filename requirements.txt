@@ -4,7 +4,7 @@ numpy
 scikit-learn
 plotly
 yfinance
-requests
+curl-cffi
+openpyxl
 beautifulsoup4
 lxml
-openpyxl
