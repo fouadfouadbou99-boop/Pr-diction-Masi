@@ -17,14 +17,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 @st.cache_data(ttl=3600)
 def scrape_masi_live() -> pd.DataFrame:
     """
-    Récupère en direct les données du MASI via Web Scraping.
+    Récupère en direct les données du MASI via Web Scraping (Bypass SSL inclus).
     """
     try:
         url = "https://www.leboursier.ma/index-detail/MASI.html"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        # verify=False permet de contourner le problème de certificat SSL
         response = requests.get(url, headers=headers, timeout=10, verify=False)
         
         if response.status_code == 200:
@@ -65,9 +64,20 @@ def load_data_from_yfinance(ticker: str, start_date: date, end_date: date) -> pd
         st.error(f"Erreur Yahoo Finance : {e}")
         return pd.DataFrame()
 
-def load_data_from_csv(uploaded_file) -> pd.DataFrame:
+def load_data_from_file(uploaded_file) -> pd.DataFrame:
+    """
+    Lit un fichier téléversé, qu'il soit au format CSV ou Excel (.xlsx / .xls).
+    """
     try:
-        df = pd.read_csv(uploaded_file)
+        filename = uploaded_file.name.lower()
+        if filename.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        elif filename.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(uploaded_file)
+        else:
+            st.error("Format de fichier non supporté.")
+            return pd.DataFrame()
+
         df.columns = [c.strip().capitalize() for c in df.columns]
         rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close'}
         df.rename(columns=rename_map, inplace=True)
@@ -79,9 +89,11 @@ def load_data_from_csv(uploaded_file) -> pd.DataFrame:
             
             df = df[['Date', 'Close']].dropna().sort_values(by='Date', ascending=True).reset_index(drop=True)
             return df
-        return pd.DataFrame()
+        else:
+            st.error("Le fichier doit contenir au moins les colonnes 'Date' et 'Close' (ou 'Clôture').")
+            return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erreur fichier CSV : {e}")
+        st.error(f"Erreur lors de la lecture du fichier : {e}")
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
@@ -117,20 +129,23 @@ st.title("📈 Application de Prédiction Boursière — MASI")
 st.sidebar.header("⚙️ Data Source")
 source_type = st.sidebar.radio(
     "Choisir la source :",
-    ["Scraping MASI en direct", "Téléverser un CSV", "Yahoo Finance"]
+    ["Scraping MASI en direct (Auto)", "Téléverser un fichier (CSV / Excel)", "Yahoo Finance"]
 )
 
 df = pd.DataFrame()
 
-if source_type == "Scraping MASI en direct":
-    if st.sidebar.button("Récupérer le MASI 🔄"):
-        with st.spinner("Scraping en cours..."):
-            df = scrape_masi_live()
+# Chargement selon le mode sélectionné
+if source_type == "Scraping MASI en direct (Auto)":
+    with st.spinner("Récupération automatique des cours du MASI..."):
+        df = scrape_masi_live()
 
-elif source_type == "Téléverser un CSV":
-    uploaded_file = st.sidebar.file_uploader("Fichier CSV", type=["csv"])
+elif source_type == "Téléverser un fichier (CSV / Excel)":
+    uploaded_file = st.sidebar.file_uploader(
+        "Sélectionnez votre fichier CSV ou Excel", 
+        type=["csv", "xlsx", "xls"]
+    )
     if uploaded_file is not None:
-        df = load_data_from_csv(uploaded_file)
+        df = load_data_from_file(uploaded_file)
 
 else:
     ticker = st.sidebar.text_input("Ticker (ex: ATW.CS)", value="ATW.CS")
@@ -138,10 +153,12 @@ else:
     start_date = col1.date_input("Début", date.today() - timedelta(days=365*2))
     end_date = col2.date_input("Fin", date.today())
     if st.sidebar.button("Charger YFinance"):
-        df = load_data_from_yfinance(ticker, start_date, end_date)
+        with st.spinner("Téléchargement depuis Yahoo Finance..."):
+            df = load_data_from_yfinance(ticker, start_date, end_date)
 
+# Affichage principal
 if not df.empty:
-    st.success(f"Données prêtes ({len(df)} lignes)")
+    st.success(f"Données chargées avec succès ({len(df)} enregistrements)")
     
     tab1, tab2, tab3 = st.tabs(["📊 Graphique", "🤖 Prédiction ML", "📑 Raw Data"])
     
@@ -153,11 +170,11 @@ if not df.empty:
         st.plotly_chart(fig, width='stretch')
         
     with tab2:
-        st.subheader("Prédiction Machine Learning")
-        days_to_predict = st.slider("Jours à prédire", min_value=1, max_value=60, value=14)
+        st.subheader("Prédiction Machine Learning (Random Forest)")
+        days_to_predict = st.slider("Nombre de jours à prédire", min_value=1, max_value=60, value=14)
         
         if st.button("Lancer la prédiction 🚀"):
-            with st.spinner("Calcul des prédictions..."):
+            with st.spinner("Entraînement du modèle et calcul des prédictions..."):
                 pred_df = train_predict_rf(df, days_to_predict)
                 
                 fig_pred = go.Figure()
@@ -166,10 +183,11 @@ if not df.empty:
                 fig_pred.update_layout(xaxis_title="Date", yaxis_title="Indice", hovermode="x unified")
                 st.plotly_chart(fig_pred, width='stretch')
                 
-                st.write("### Tableau des prédictions")
+                st.write("### Tableau des prédictions chiffrées")
                 st.dataframe(pred_df, width='stretch')
 
     with tab3:
+        st.subheader("Aperçu des données brutes")
         st.dataframe(df, width='stretch')
 else:
-    st.info("Sélectionnez une source de données dans la barre latérale et cliquez sur le bouton d'action pour commencer.")
+    st.warning("Aucune donnée disponible. Veuillez choisir une source ou importer un fichier valide.")
