@@ -17,17 +17,17 @@ HEADERS = {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Nettoyage & Alignement Chronologique (Du passé vers le présent)
+# 1. Nettoyage & Alignement Chronologique Strict
 # ------------------------------------------------------------------------------
 def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
     """Nettoie les valeurs boursières et trie le DataFrame du passé au présent."""
     if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
         return pd.DataFrame()
 
-    # Normalisation des dates
+    # Normalisation des dates (suppression des composantes horaires)
     df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce').dt.normalize()
     
-    # Traitement des montants numériques (Gestion des espaces insécables et virgules)
+    # Conversion numérique (nettoyage des espaces insécables et virgules marocaines)
     if df['Close'].dtype == object:
         df['Close'] = (
             df['Close']
@@ -44,18 +44,14 @@ def clean_and_sort_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # ------------------------------------------------------------------------------
-# 2. Récupération Directe depuis la Bourse de Casablanca
+# 2. Scraping Direct Anti-Blocage (Bourse de Casablanca)
 # ------------------------------------------------------------------------------
 @st.cache_data(ttl=900)
 def scrape_casablanca_bourse() -> pd.DataFrame:
-    """
-    Extrait le cours réel de l'indice MASI exclusivement depuis le site officiel
-    de la Bourse de Casablanca (via un relai proxy anti-blocage IP).
-    """
+    """Tentative d'extraction en direct avec contournement de proxy."""
     bvc_url = "https://www.casablanca-bourse.com/fr/indices/masi"
     proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(bvc_url)}"
     
-    # Tentative A : Relais Proxy CORS
     try:
         res = requests.get(proxy_url, timeout=10)
         if res.status_code == 200:
@@ -74,34 +70,15 @@ def scrape_casablanca_bourse() -> pd.DataFrame:
     except Exception:
         pass
 
-    # Tentative B : Direct HTTP avec Headers
-    try:
-        res = requests.get(bvc_url, headers=HEADERS, timeout=8, verify=False)
-        if res.status_code == 200:
-            tables = pd.read_html(res.text)
-            for df in tables:
-                cols = [str(c).lower() for c in df.columns]
-                if any('date' in c or 'séance' in c for c in cols):
-                    df.columns = [c.strip().capitalize() for c in df.columns]
-                    rename_map = {'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 'Valeur': 'Close', 'Séance': 'Date'}
-                    df.rename(columns=rename_map, inplace=True)
-                    cleaned = clean_and_sort_df(df)
-                    if not cleaned.empty and len(cleaned) > 5:
-                        return cleaned
-    except Exception:
-        pass
-
     return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 3. Importation de Fichiers Excel / CSV Officiels BVC
+# 3. Moteur d'Importation Excel / CSV
 # ------------------------------------------------------------------------------
 def load_data_from_file(uploaded_file) -> pd.DataFrame:
-    """Charge et adapte un fichier Excel ou CSV exporté depuis la Bourse de Casablanca."""
+    """Charge et adapte un fichier Excel ou CSV de la Bourse de Casablanca."""
     try:
         filename = uploaded_file.name.lower()
-        
-        # Traitement Excel (XLSX, XLS) vs CSV
         if filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(uploaded_file)
         elif filename.endswith('.csv'):
@@ -110,7 +87,6 @@ def load_data_from_file(uploaded_file) -> pd.DataFrame:
             st.error("Format non pris en charge. Veuillez importer un fichier .xlsx, .xls ou .csv")
             return pd.DataFrame()
 
-        # Normalisation automatique des noms de colonnes boursières marocaines
         df.columns = [str(c).strip().capitalize() for c in df.columns]
         rename_map = {
             'Clôture': 'Close', 'Prix': 'Close', 'Dernier': 'Close', 
@@ -124,7 +100,7 @@ def load_data_from_file(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
-# 4. Modèle Machine Learning (Random Forest)
+# 4. Modèle Machine Learning (Random Forest - Business Days)
 # ------------------------------------------------------------------------------
 def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     data = df[['Date', 'Close']].copy()
@@ -139,7 +115,7 @@ def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     last_index = data['Day_Index'].iloc[-1]
     last_date = data['Date'].iloc[-1]
     
-    # Projection exclusivement alignée sur les jours ouvrés (Business Days)
+    # Alignement exclusif sur les jours ouvrés (freq='B')
     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=days_to_predict, freq='B')
     future_indices = np.array([[last_index + i] for i in range(1, len(future_dates) + 1)])
     preds = model.predict(future_indices)
@@ -148,7 +124,7 @@ def train_predict_rf(df: pd.DataFrame, days_to_predict: int):
     return pred_df
 
 # ------------------------------------------------------------------------------
-# 5. Interface Utilisateur Streamlit
+# 5. Interface Streamlit
 # ------------------------------------------------------------------------------
 st.set_page_config(page_title="Prédiction MASI — Bourse de Casablanca", page_icon="📈", layout="wide")
 
@@ -157,13 +133,13 @@ st.title("📈 Prédiction Boursière MASI — Bourse de Casablanca")
 st.sidebar.header("⚙️ Source de Données")
 source_type = st.sidebar.radio(
     "Choisir le mode d'alimentation :",
-    ["Bourse de Casablanca (Direct Officiel)", "Fichier Local (Excel / CSV BVC)"]
+    ["Fichier Local (Excel / CSV BVC)", "Bourse de Casablanca (Direct Officiel)"]
 )
 
 df = pd.DataFrame()
 
 if source_type == "Bourse de Casablanca (Direct Officiel)":
-    with st.spinner("Connexion au site officiel de la Bourse de Casablanca..."):
+    with st.spinner("Connexion au serveur BVC..."):
         df = scrape_casablanca_bourse()
 
 else:
@@ -171,11 +147,11 @@ else:
     if uploaded_file is not None:
         df = load_data_from_file(uploaded_file)
 
-# Affichage & Analyses
+# Affichage des résultats
 if not df.empty:
-    st.success(f"Données de la Bourse de Casablanca chargées avec succès ({len(df)} séances boursières). Dernier cours : **{df['Close'].iloc[-1]:,.2f}** Pts/MAD")
+    st.success(f"Données BVC chargées avec succès ({len(df)} séances boursières). Dernier cours : **{df['Close'].iloc[-1]:,.2f}** Pts/MAD")
     
-    tab1, tab2, tab3 = st.tabs(["📊 Graphique Officiel", "🤖 Prédiction ML (Random Forest)", "📑 Données Brutes"])
+    tab1, tab2, tab3 = st.tabs(["📊 Graphique Historique", "🤖 Prédiction ML (Random Forest)", "📑 Données Brutes"])
     
     with tab1:
         st.subheader("Historique du MASI")
@@ -198,7 +174,7 @@ if not df.empty:
                 fig_pred.update_layout(xaxis_title="Date", yaxis_title="Valeur", hovermode="x unified")
                 st.plotly_chart(fig_pred, width='stretch')
                 
-                st.write("### Projections des séances à venir")
+                st.write("### Tableau des prédictions")
                 st.dataframe(pred_df, width='stretch')
                 
                 csv_data = pred_df.to_csv(index=False).encode('utf-8')
@@ -210,8 +186,8 @@ if not df.empty:
                 )
 
     with tab3:
-        st.subheader("Données brutes (Triées chronologiquement)")
+        st.subheader("Données brutes vérifiées")
         st.dataframe(df, width='stretch')
 
 else:
-    st.info("⚠️ Le scraping direct du serveur BVC est restreint depuis cette zone IP. Basculez sur 'Fichier Local' à gauche et téléversez votre export Excel/CSV téléchargé sur la Bourse de Casablanca.")
+    st.info("💡 Veuillez importer votre fichier Excel (`.xlsx`) ou `.csv` téléchargé depuis la Bourse de Casablanca dans le menu de gauche.")
