@@ -19,56 +19,94 @@ st.set_page_config(
 st.title("📈 Prévision du MASI")
 
 # =============================================================================
-# CHARGEMENT EXCEL MULTI-FEUILLES
+# CHARGEMENT EXCEL
 # =============================================================================
 
 @st.cache_data
-def load_excel_model(path):
+def load_excel_model(file):
 
     workbook = {}
 
-    xls = pd.ExcelFile(path)
+    xls = pd.ExcelFile(file)
 
     for sheet in xls.sheet_names:
 
-        try:
+        df = pd.read_excel(
+            xls,
+            sheet_name=sheet
+        )
 
-            df = pd.read_excel(
-                xls,
-                sheet_name=sheet
+        if "Date" in df.columns:
+
+            df["Date"] = pd.to_datetime(
+                df["Date"],
+                errors="coerce"
             )
 
-            if "Date" in df.columns:
-
-                df["Date"] = pd.to_datetime(
-                    df["Date"],
-                    errors="coerce"
-                )
-
-            workbook[sheet] = df
-
-        except Exception as e:
-
-            st.warning(
-                f"Erreur feuille {sheet}: {e}"
-            )
+        workbook[sheet] = df
 
     return workbook
 
 
-try:
+st.sidebar.header("📂 Données")
 
-    workbook = load_excel_model(
-        "data/masi_model.xlsx"
-    )
+uploaded_file = st.sidebar.file_uploader(
+    "Importer un fichier Excel",
+    type=["xlsx", "xls"]
+)
 
-except Exception as e:
+workbook = {}
 
-    st.error(
-        f"Impossible de lire data/masi_model.xlsx : {e}"
-    )
+# priorité au fichier importé
 
-    st.stop()
+if uploaded_file is not None:
+
+    try:
+
+        workbook = load_excel_model(
+            uploaded_file
+        )
+
+        st.sidebar.success(
+            "Fichier Excel chargé"
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Erreur : {e}"
+        )
+
+        st.stop()
+
+else:
+
+    try:
+
+        workbook = load_excel_model(
+            "data/masi_model.xlsx"
+        )
+
+        st.sidebar.info(
+            "Fichier local utilisé"
+        )
+
+    except Exception:
+
+        st.warning(
+            """
+            Aucun fichier chargé.
+
+            Importez un fichier Excel contenant
+            une feuille nommée MASI
+            avec les colonnes :
+
+            Date
+            Close
+            """
+        )
+
+        st.stop()
 
 # =============================================================================
 # FEUILLE MASI
@@ -77,24 +115,33 @@ except Exception as e:
 if "MASI" not in workbook:
 
     st.error(
-        "Feuille MASI absente"
+        "La feuille MASI est absente."
     )
 
     st.stop()
 
 df = workbook["MASI"].copy()
 
-required = ["Date", "Close"]
+if "Date" not in df.columns:
 
-for col in required:
+    st.error(
+        "Colonne Date absente."
+    )
 
-    if col not in df.columns:
+    st.stop()
 
-        st.error(
-            f"Colonne obligatoire absente : {col}"
-        )
+if "Close" not in df.columns:
 
-        st.stop()
+    st.error(
+        "Colonne Close absente."
+    )
+
+    st.stop()
+
+df["Date"] = pd.to_datetime(
+    df["Date"],
+    errors="coerce"
+)
 
 df["Close"] = pd.to_numeric(
     df["Close"],
@@ -107,29 +154,13 @@ df = (
       .reset_index(drop=True)
 )
 
-# =============================================================================
-# SIDEBAR
-# =============================================================================
+if len(df) < 60:
 
-st.sidebar.header(
-    "📁 Modèle Excel"
-)
+    st.error(
+        "Au moins 60 observations sont nécessaires."
+    )
 
-sheet_names = list(
-    workbook.keys()
-)
-
-selected_sheet = st.sidebar.selectbox(
-    "Consulter une feuille",
-    sheet_names
-)
-
-horizon = st.sidebar.slider(
-    "Horizon prévision",
-    1,
-    30,
-    10
-)
+    st.stop()
 
 # =============================================================================
 # KPI
@@ -139,12 +170,16 @@ last_close = float(
     df["Close"].iloc[-1]
 )
 
-prev_close = float(
-    df["Close"].iloc[-2]
-)
+if len(df) > 1:
+    prev_close = float(
+        df["Close"].iloc[-2]
+    )
+else:
+    prev_close = last_close
 
 variation = (
-    (last_close / prev_close) - 1
+    (last_close / prev_close)
+    - 1
 ) * 100
 
 ma20 = (
@@ -167,7 +202,18 @@ c2.metric(
 
 c3.metric(
     "MA20",
-    f"{ma20:,.2f}"
+    f"{ma20:.2f}"
+)
+
+# =============================================================================
+# PARAMETRES
+# =============================================================================
+
+horizon = st.sidebar.slider(
+    "Horizon de prévision",
+    1,
+    30,
+    10
 )
 
 # =============================================================================
@@ -199,80 +245,10 @@ with tab1:
         )
     )
 
-    fig.update_layout(
-        height=600,
-        title="Historique MASI"
-    )
-
     st.plotly_chart(
         fig,
         use_container_width=True
     )
-
-# =============================================================================
-# BACKTEST
-# =============================================================================
-
-with tab3:
-
-    st.subheader(
-        "Walk Forward Validation"
-    )
-
-    try:
-
-        bt, mae, rmse, r2, sigma = (
-            walk_forward_validation(df)
-        )
-
-        b1, b2, b3, b4 = st.columns(4)
-
-        b1.metric(
-            "MAE",
-            round(mae, 2)
-        )
-
-        b2.metric(
-            "RMSE",
-            round(rmse, 2)
-        )
-
-        b3.metric(
-            "R²",
-            round(r2, 3)
-        )
-
-        b4.metric(
-            "Sigma",
-            round(sigma, 2)
-        )
-
-        fig_bt = go.Figure()
-
-        fig_bt.add_trace(
-            go.Scatter(
-                y=bt["Actual"],
-                name="Réel"
-            )
-        )
-
-        fig_bt.add_trace(
-            go.Scatter(
-                y=bt["Forecast"],
-                name="Prévision"
-            )
-        )
-
-        st.plotly_chart(
-            fig_bt,
-            use_container_width=True
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"Erreur backtest : {e}"
-        )
 
 # =============================================================================
 # PREVISION
@@ -289,24 +265,23 @@ with tab2:
         model = train_model(df)
 
         forecast_df = recursive_forecast(
-            model=model,
-            df=df,
-            horizon=horizon,
-            sigma=sigma
+            model,
+            df,
+            horizon,
+            sigma
         )
 
-        fig_pred = go.Figure()
+        fig = go.Figure()
 
-        fig_pred.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=df["Date"],
                 y=df["Close"],
-                name="Historique",
-                line=dict(color="blue")
+                name="Historique"
             )
         )
 
-        fig_pred.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=forecast_df["Date"],
                 y=forecast_df["Upper95"],
@@ -315,7 +290,7 @@ with tab2:
             )
         )
 
-        fig_pred.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=forecast_df["Date"],
                 y=forecast_df["Lower95"],
@@ -326,39 +301,22 @@ with tab2:
             )
         )
 
-        fig_pred.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=forecast_df["Date"],
                 y=forecast_df["Prediction"],
-                name="Prévision",
-                line=dict(
-                    color="red",
-                    dash="dash",
-                    width=3
-                )
+                name="Prévision"
             )
         )
 
-        fig_pred.update_layout(
-            height=650,
-            title="Prévision MASI"
-        )
-
         st.plotly_chart(
-            fig_pred,
+            fig,
             use_container_width=True
         )
 
         st.dataframe(
             forecast_df,
             use_container_width=True
-        )
-
-        st.download_button(
-            "📥 Télécharger les prévisions",
-            forecast_df.to_csv(index=False),
-            "previsions_masi.csv",
-            "text/csv"
         )
 
     except Exception as e:
@@ -368,25 +326,53 @@ with tab2:
         )
 
 # =============================================================================
-# SOURCES EXCEL
+# BACKTEST
+# =============================================================================
+
+with tab3:
+
+    try:
+
+        bt, mae, rmse, r2, sigma = (
+            walk_forward_validation(df)
+        )
+
+        a, b, c, d = st.columns(4)
+
+        a.metric("MAE", round(mae, 2))
+        b.metric("RMSE", round(rmse, 2))
+        c.metric("R²", round(r2, 3))
+        d.metric("Sigma", round(sigma, 2))
+
+        st.dataframe(
+            bt.tail(50),
+            use_container_width=True
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Erreur backtest : {e}"
+        )
+
+# =============================================================================
+# SOURCES
 # =============================================================================
 
 with tab4:
 
-    st.subheader(
-        f"Feuille : {selected_sheet}"
+    feuilles = list(
+        workbook.keys()
+    )
+
+    feuille = st.selectbox(
+        "Choisir une feuille",
+        feuilles
     )
 
     st.dataframe(
-        workbook[selected_sheet],
+        workbook[feuille],
         use_container_width=True
-    )
-
-    st.download_button(
-        f"Télécharger {selected_sheet}",
-        workbook[selected_sheet].to_csv(index=False),
-        file_name=f"{selected_sheet}.csv",
-        mime="text/csv"
     )
 
 # =============================================================================
@@ -394,15 +380,5 @@ with tab4:
 # =============================================================================
 
 st.caption(
-    """
-    Modèle de prévision du MASI avec :
-    
-    • Validation Walk-Forward
-    • Intervalles de confiance 95 %
-    • Prévision récursive
-    • Données Excel multi-feuilles
-    
-    Les prévisions sont indicatives et ne constituent pas
-    un conseil d'investissement.
-    """
+    "Prévisions indicatives - aucun conseil d'investissement."
 )
