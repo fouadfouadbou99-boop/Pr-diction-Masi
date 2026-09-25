@@ -3,6 +3,7 @@ import numpy as np
 
 
 def compute_rsi(series, period=14):
+
     delta = series.diff()
 
     gain = delta.clip(lower=0)
@@ -24,8 +25,6 @@ def create_features(df):
 
     data = df.copy()
 
-    data = data[["Date", "Close"]].copy()
-
     data["Close"] = pd.to_numeric(
         data["Close"],
         errors="coerce"
@@ -39,23 +38,11 @@ def create_features(df):
 
     data["Return_20"] = data["Close"].pct_change(20)
 
-    data["MA5"] = (
-        data["Close"]
-        .rolling(5)
-        .mean()
-    )
+    data["MA5"] = data["Close"].rolling(5).mean()
 
-    data["MA20"] = (
-        data["Close"]
-        .rolling(20)
-        .mean()
-    )
+    data["MA20"] = data["Close"].rolling(20).mean()
 
-    data["MA50"] = (
-        data["Close"]
-        .rolling(50)
-        .mean()
-    )
+    data["MA50"] = data["Close"].rolling(50).mean()
 
     data["EMA20"] = (
         data["Close"]
@@ -78,6 +65,27 @@ def create_features(df):
         data["Close"]
     )
 
+    # Variables macro facultatives
+
+    macro_cols = [
+        "Taux_Directeur",
+        "USDMAD",
+        "EURMAD",
+        "CAC40",
+        "SP500"
+    ]
+
+    for col in macro_cols:
+
+        if col in data.columns:
+
+            data[col] = pd.to_numeric(
+                data[col],
+                errors="coerce"
+            )
+
+    data = data.ffill().bfill()
+
     data["Target"] = (
         data["Close"]
         .shift(-1)
@@ -86,3 +94,4 @@ def create_features(df):
     data = data.dropna()
 
     return data
+`
