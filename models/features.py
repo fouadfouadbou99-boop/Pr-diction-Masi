@@ -16,9 +16,7 @@ def compute_rsi(series, period=14):
 
     rs = avg_gain / avg_loss
 
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 
 def create_features(df):
@@ -55,43 +53,3 @@ def create_features(df):
         - data["Close"].shift(10)
     )
 
-    data["Volatility"] = (
-        data["Return_1"]
-        .rolling(20)
-        .std()
-    )
-
-    data["RSI"] = compute_rsi(
-        data["Close"]
-    )
-
-    # Variables macro facultatives
-
-    macro_cols = [
-        "Taux_Directeur",
-        "USDMAD",
-        "EURMAD",
-        "CAC40",
-        "SP500"
-    ]
-
-    for col in macro_cols:
-
-        if col in data.columns:
-
-            data[col] = pd.to_numeric(
-                data[col],
-                errors="coerce"
-            )
-
-    data = data.ffill().bfill()
-
-    data["Target"] = (
-        data["Close"]
-        .shift(-1)
-    )
-
-    data = data.dropna()
-
-    return data
-`
