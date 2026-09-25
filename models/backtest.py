@@ -34,13 +34,17 @@ def walk_forward_validation(df):
 
     data = create_features(df)
 
-    actuals = []
+    if len(data) < 80:
+        raise ValueError(
+            f"Données insuffisantes ({len(data)} lignes)."
+        )
 
+    actuals = []
     forecasts = []
 
     start = max(
-        250,
-        int(len(data) * 0.5)
+        50,
+        int(len(data) * 0.7)
     )
 
     for i in range(start, len(data) - 1):
@@ -50,7 +54,7 @@ def walk_forward_validation(df):
         test = data.iloc[i:i + 1]
 
         model = HistGradientBoostingRegressor(
-            max_iter=300,
+            max_iter=200,
             random_state=42
         )
 
@@ -59,15 +63,19 @@ def walk_forward_validation(df):
             train["Target"]
         )
 
-        pred = model.predict(
+        prediction = model.predict(
             test[FEATURES]
         )[0]
 
         actuals.append(
-            test["Target"].values[0]
+            float(
+                test["Target"].iloc[0]
+            )
         )
 
-        forecasts.append(pred)
+        forecasts.append(
+            float(prediction)
+        )
 
     bt = pd.DataFrame(
         {
@@ -98,4 +106,10 @@ def walk_forward_validation(df):
         - bt["Forecast"]
     ).std()
 
-    return bt, mae, rmse, r2, sigma
+    return (
+        bt,
+        mae,
+        rmse,
+        r2,
+        sigma
+    )
