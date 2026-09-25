@@ -28,13 +28,19 @@ def recursive_forecast(
             history
         )
 
+        if feature_df.empty:
+
+            raise ValueError(
+                "Impossible de calculer les indicateurs."
+            )
+
         row = feature_df.iloc[-1]
 
         X = pd.DataFrame(
             [row[FEATURES]]
         )
 
-        pred = model.predict(X)[0]
+        prediction = model.predict(X)[0]
 
         future_date = (
             last_date
@@ -44,14 +50,14 @@ def recursive_forecast(
         forecasts.append(
             {
                 "Date": future_date,
-                "Prediction": pred
+                "Prediction": float(prediction)
             }
         )
 
         new_row = pd.DataFrame(
             {
                 "Date": [future_date],
-                "Close": [pred]
+                "Close": [prediction]
             }
         )
 
