@@ -26,13 +26,7 @@ FEATURES = [
     "EMA20",
     "Momentum",
     "RSI",
-    "Volatility",
-
-    "Taux_Directeur",
-    "USDMAD",
-    "EURMAD",
-    "CAC40",
-    "SP500"
+    "Volatility"
 ]
 
 
@@ -40,10 +34,16 @@ def walk_forward_validation(df):
 
     data = create_features(df)
 
-    if len(data) < 50:
+    if data.empty:
 
         raise ValueError(
-            f"Données insuffisantes : {len(data)} lignes."
+            "Pas assez de données après création des indicateurs."
+        )
+
+    if len(data) < 30:
+
+        raise ValueError(
+            f"Seulement {len(data)} lignes disponibles."
         )
 
     actuals = []
@@ -54,36 +54,30 @@ def walk_forward_validation(df):
         int(len(data) * 0.70)
     )
 
-    for i in range(
-        start,
-        len(data) - 1
-    ):
+    for i in range(start, len(data) - 1):
 
         train = data.iloc[:i]
 
-        test = data.iloc[i:i+1]
-
-        available = [
-            c for c in FEATURES
-            if c in train.columns
-        ]
+        test = data.iloc[i:i + 1]
 
         model = HistGradientBoostingRegressor(
-            max_iter=200,
+            max_iter=100,
             random_state=42
         )
 
         model.fit(
-            train[available],
+            train[FEATURES],
             train["Target"]
         )
 
         pred = model.predict(
-            test[available]
+            test[FEATURES]
         )[0]
 
         actuals.append(
-            float(test["Target"].iloc[0])
+            float(
+                test["Target"].iloc[0]
+            )
         )
 
         forecasts.append(
