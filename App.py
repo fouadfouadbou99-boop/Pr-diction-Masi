@@ -33,18 +33,15 @@ def load_excel_model(file):
 
         try:
 
-            df = pd.read_excel(
+            workbook[sheet] = pd.read_excel(
                 xls,
                 sheet_name=sheet
             )
-
-            workbook[sheet] = df
 
         except Exception:
             pass
 
     return workbook
-
 
 st.sidebar.header("📂 Données")
 
@@ -57,57 +54,45 @@ workbook = {}
 
 if uploaded_file is not None:
 
-    try:
+    workbook = load_excel_model(
+        uploaded_file
+    )
 
-        workbook = load_excel_model(uploaded_file)
-
-        st.sidebar.success(
-            "Fichier Excel chargé"
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"Erreur lecture Excel : {e}"
-        )
-
-        st.stop()
+    st.sidebar.success(
+        "Fichier Excel chargé"
+    )
 
 else:
 
-    try:
+    st.warning(
+        """
+        Importez un fichier Excel contenant :
 
-        workbook = load_excel_model(
-            "data/masi_model.xlsx"
-        )
+        Date | Close
 
-        st.sidebar.info(
-            "Fichier local utilisé"
-        )
+        dans une feuille appelée MASI
+        ou dans la première feuille.
+        """
+    )
 
-    except Exception:
-
-        st.warning(
-            """
-            Aucun fichier Excel trouvé.
-
-            Importez un fichier Excel.
-            """
-        )
-
-        st.stop()
+    st.stop()
 
 # =============================================================================
 # FEUILLES
 # =============================================================================
 
-st.sidebar.markdown("### Feuilles détectées")
+st.sidebar.subheader(
+    "Feuilles détectées"
+)
 
 for sheet in workbook.keys():
-    st.sidebar.write(f"• {sheet}")
+
+    st.sidebar.write(
+        f"• {sheet}"
+    )
 
 # =============================================================================
-# SELECTION AUTOMATIQUE
+# CHOIX FEUILLE
 # =============================================================================
 
 if "MASI" in workbook:
@@ -116,13 +101,15 @@ if "MASI" in workbook:
 
 else:
 
-    first_sheet = list(workbook.keys())[0]
+    sheet_name = list(
+        workbook.keys()
+    )[0]
 
     st.warning(
-        f"Utilisation automatique de la feuille : {first_sheet}"
+        f"Utilisation de : {sheet_name}"
     )
 
-    df = workbook[first_sheet].copy()
+    df = workbook[sheet_name].copy()
 
 # =============================================================================
 # NORMALISATION COLONNES
@@ -132,10 +119,8 @@ rename_map = {
 
     "DATE": "Date",
     "date": "Date",
-    "Date": "Date",
     "Séance": "Date",
     "SEANCE": "Date",
-    "SEANCES": "Date",
 
     "Close": "Close",
     "CLOSE": "Close",
@@ -146,7 +131,7 @@ rename_map = {
     "Prix": "Close",
     "PRIX": "Close",
     "Valeur": "Close",
-    "VALEUR": "Close",
+    "VALEUR": "Close"
 }
 
 df.rename(
@@ -154,13 +139,22 @@ df.rename(
     inplace=True
 )
 
-st.sidebar.markdown("### Colonnes détectées")
-st.sidebar.write(list(df.columns))
+st.sidebar.subheader(
+    "Colonnes détectées"
+)
+
+st.sidebar.write(
+    list(df.columns)
+)
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
 
 if "Date" not in df.columns:
 
     st.error(
-        "Aucune colonne Date détectée."
+        "Colonne Date introuvable."
     )
 
     st.stop()
@@ -168,7 +162,7 @@ if "Date" not in df.columns:
 if "Close" not in df.columns:
 
     st.error(
-        "Aucune colonne Close détectée."
+        "Colonne Close introuvable."
     )
 
     st.stop()
@@ -185,32 +179,49 @@ df["Close"] = pd.to_numeric(
 
 df = (
     df.dropna()
-    .sort_values("Date")
-    .reset_index(drop=True)
+      .sort_values("Date")
+      .reset_index(drop=True)
 )
 
-if len(df) < 60:
+if len(df) < 80:
 
-    st.warning(
-        f"Historique limité : {len(df)} lignes"
+    st.error(
+        f"""
+        Historique insuffisant.
+
+        Nombre de lignes :
+        {len(df)}
+
+        Minimum recommandé :
+        80
+        """
     )
+
+    st.stop()
 
 # =============================================================================
 # KPI
 # =============================================================================
 
-last_close = float(df["Close"].iloc[-1])
+last_close = float(
+    df["Close"].iloc[-1]
+)
 
-if len(df) > 1:
-    prev_close = float(df["Close"].iloc[-2])
-else:
-    prev_close = last_close
+prev_close = float(
+    df["Close"].iloc[-2]
+)
 
 variation = (
-    (last_close / prev_close) - 1
+    (
+        last_close / prev_close
+    ) - 1
 ) * 100
 
-ma20 = df["Close"].tail(20).mean()
+ma20 = (
+    df["Close"]
+    .tail(20)
+    .mean()
+)
 
 c1, c2, c3 = st.columns(3)
 
@@ -244,12 +255,14 @@ horizon = st.sidebar.slider(
 # TABS
 # =============================================================================
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Historique",
-    "🔮 Prévisions",
-    "📈 Backtest",
-    "📁 Sources"
-])
+tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "📊 Historique",
+        "🔮 Prévisions",
+        "📈 Backtest",
+        "📁 Sources"
+    ]
+)
 
 # =============================================================================
 # HISTORIQUE
@@ -273,7 +286,7 @@ with tab1:
     )
 
 # =============================================================================
-# PREVISION
+# PREVISIONS
 # =============================================================================
 
 with tab2:
@@ -287,10 +300,10 @@ with tab2:
         model = train_model(df)
 
         forecast_df = recursive_forecast(
-            model,
-            df,
-            horizon,
-            sigma
+            model=model,
+            df=df,
+            horizon=horizon,
+            sigma=sigma
         )
 
         fig = go.Figure()
@@ -300,6 +313,26 @@ with tab2:
                 x=df["Date"],
                 y=df["Close"],
                 name="Historique"
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_df["Date"],
+                y=forecast_df["Upper95"],
+                line=dict(width=0),
+                showlegend=False
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_df["Date"],
+                y=forecast_df["Lower95"],
+                fill="tonexty",
+                fillcolor="rgba(255,0,0,0.15)",
+                line=dict(width=0),
+                name="IC95%"
             )
         )
 
@@ -323,9 +356,7 @@ with tab2:
 
     except Exception as e:
 
-        st.error(
-            f"Erreur prévision : {e}"
-        )
+        st.exception(e)
 
 # =============================================================================
 # BACKTEST
@@ -341,10 +372,25 @@ with tab3:
 
         a, b, c, d = st.columns(4)
 
-        a.metric("MAE", round(mae, 2))
-        b.metric("RMSE", round(rmse, 2))
-        c.metric("R²", round(r2, 3))
-        d.metric("Sigma", round(sigma, 2))
+        a.metric(
+            "MAE",
+            f"{mae:.2f}"
+        )
+
+        b.metric(
+            "RMSE",
+            f"{rmse:.2f}"
+        )
+
+        c.metric(
+            "R²",
+            f"{r2:.3f}"
+        )
+
+        d.metric(
+            "Sigma",
+            f"{sigma:.2f}"
+        )
 
         st.dataframe(
             bt.tail(50),
@@ -353,9 +399,7 @@ with tab3:
 
     except Exception as e:
 
-        st.error(
-            f"Erreur backtest : {e}"
-        )
+        st.exception(e)
 
 # =============================================================================
 # SOURCES
@@ -363,13 +407,13 @@ with tab3:
 
 with tab4:
 
-    feuille = st.selectbox(
+    selected_sheet = st.selectbox(
         "Choisir une feuille",
         list(workbook.keys())
     )
 
     st.dataframe(
-        workbook[feuille],
+        workbook[selected_sheet],
         width="stretch"
     )
 
@@ -378,5 +422,16 @@ with tab4:
 # =============================================================================
 
 st.caption(
-    "Prévisions indicatives - aucun conseil d'investissement."
+    """
+    Prévisions indicatives.
+
+    Modèle :
+    HistGradientBoostingRegressor
+
+    Validation :
+    Walk Forward Backtesting
+
+    Les résultats ne constituent pas
+    un conseil d'investissement.
+    """
 )
