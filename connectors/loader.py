@@ -9,24 +9,52 @@ from connectors.local import (
 
 def load_masi():
 
-    loaders = [
-        load_casablanca,
-        load_local
-    ]
+    print(
+        "Tentative chargement Casablanca..."
+    )
 
-    for loader in loaders:
+    try:
 
-        try:
+        df = load_casablanca()
 
-            df = loader()
+        if (
+            df is not None
+            and
+            not df.empty
+        ):
+            print(
+                f"Casablanca OK : {len(df)} lignes"
+            )
+            return df
 
-            if (
-                df is not None
-                and not df.empty
-            ):
-                return df
+    except Exception as e:
 
-        except Exception:
-            pass
+        print(
+            f"Erreur Casablanca : {e}"
+        )
+
+    print(
+        "Passage au fichier local..."
+    )
+
+    try:
+
+        df = load_local()
+
+        if (
+            df is not None
+            and
+            not df.empty
+        ):
+            print(
+                f"Local OK : {len(df)} lignes"
+            )
+            return df
+
+    except Exception as e:
+
+        print(
+            f"Erreur local : {e}"
+        )
 
     return None
