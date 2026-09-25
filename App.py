@@ -31,19 +31,17 @@ def load_excel_model(file):
 
     for sheet in xls.sheet_names:
 
-        df = pd.read_excel(
-            xls,
-            sheet_name=sheet
-        )
+        try:
 
-        if "Date" in df.columns:
-
-            df["Date"] = pd.to_datetime(
-                df["Date"],
-                errors="coerce"
+            df = pd.read_excel(
+                xls,
+                sheet_name=sheet
             )
 
-        workbook[sheet] = df
+            workbook[sheet] = df
+
+        except Exception:
+            pass
 
     return workbook
 
@@ -57,15 +55,11 @@ uploaded_file = st.sidebar.file_uploader(
 
 workbook = {}
 
-# priorité au fichier importé
-
 if uploaded_file is not None:
 
     try:
 
-        workbook = load_excel_model(
-            uploaded_file
-        )
+        workbook = load_excel_model(uploaded_file)
 
         st.sidebar.success(
             "Fichier Excel chargé"
@@ -74,7 +68,7 @@ if uploaded_file is not None:
     except Exception as e:
 
         st.error(
-            f"Erreur : {e}"
+            f"Erreur lecture Excel : {e}"
         )
 
         st.stop()
@@ -95,37 +89,78 @@ else:
 
         st.warning(
             """
-            Aucun fichier chargé.
+            Aucun fichier Excel trouvé.
 
-            Importez un fichier Excel contenant
-            une feuille nommée MASI
-            avec les colonnes :
-
-            Date
-            Close
+            Importez un fichier Excel.
             """
         )
 
         st.stop()
 
 # =============================================================================
-# FEUILLE MASI
+# FEUILLES
 # =============================================================================
 
-if "MASI" not in workbook:
+st.sidebar.markdown("### Feuilles détectées")
 
-    st.error(
-        "La feuille MASI est absente."
+for sheet in workbook.keys():
+    st.sidebar.write(f"• {sheet}")
+
+# =============================================================================
+# SELECTION AUTOMATIQUE
+# =============================================================================
+
+if "MASI" in workbook:
+
+    df = workbook["MASI"].copy()
+
+else:
+
+    first_sheet = list(workbook.keys())[0]
+
+    st.warning(
+        f"Utilisation automatique de la feuille : {first_sheet}"
     )
 
-    st.stop()
+    df = workbook[first_sheet].copy()
 
-df = workbook["MASI"].copy()
+# =============================================================================
+# NORMALISATION COLONNES
+# =============================================================================
+
+rename_map = {
+
+    "DATE": "Date",
+    "date": "Date",
+    "Date": "Date",
+    "Séance": "Date",
+    "SEANCE": "Date",
+    "SEANCES": "Date",
+
+    "Close": "Close",
+    "CLOSE": "Close",
+    "Clôture": "Close",
+    "CLOTURE": "Close",
+    "Cours": "Close",
+    "COURS": "Close",
+    "Prix": "Close",
+    "PRIX": "Close",
+    "Valeur": "Close",
+    "VALEUR": "Close",
+}
+
+df.rename(
+    columns=rename_map,
+    inplace=True
+)
+
+st.sidebar.markdown("### Colonnes détectées")
+st.sidebar.write(list(df.columns))
 
 if "Date" not in df.columns:
 
     st.error(
-        "Colonne Date absente."
+        "Aucune colonne Date détectée."
     )
 
     st.stop()
@@ -133,7 +168,7 @@ if "Date" not in df.columns:
 if "Close" not in df.columns:
 
     st.error(
-        "Colonne Close absente."
+        "Aucune colonne Close détectée."
     )
 
     st.stop()
@@ -150,43 +185,32 @@ df["Close"] = pd.to_numeric(
 
 df = (
     df.dropna()
-      .sort_values("Date")
-      .reset_index(drop=True)
+    .sort_values("Date")
+    .reset_index(drop=True)
 )
 
 if len(df) < 60:
 
-    st.error(
-        "Au moins 60 observations sont nécessaires."
+    st.warning(
+        f"Historique limité : {len(df)} lignes"
     )
-
-    st.stop()
 
 # =============================================================================
 # KPI
 # =============================================================================
 
-last_close = float(
-    df["Close"].iloc[-1]
-)
+last_close = float(df["Close"].iloc[-1])
 
 if len(df) > 1:
-    prev_close = float(
-        df["Close"].iloc[-2]
-    )
+    prev_close = float(df["Close"].iloc[-2])
 else:
     prev_close = last_close
 
 variation = (
-    (last_close / prev_close)
-    - 1
+    (last_close / prev_close) - 1
 ) * 100
 
-ma20 = (
-    df["Close"]
-    .tail(20)
-    .mean()
-)
+ma20 = df["Close"].tail(20).mean()
 
 c1, c2, c3 = st.columns(3)
 
@@ -210,7 +234,7 @@ c3.metric(
 # =============================================================================
 
 horizon = st.sidebar.slider(
-    "Horizon de prévision",
+    "Horizon prévision",
     1,
     30,
     10
@@ -220,14 +244,12 @@ horizon = st.sidebar.slider(
 # TABS
 # =============================================================================
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    [
-        "📊 Historique",
-        "🔮 Prévisions",
-        "📈 Backtest",
-        "📁 Sources"
-    ]
-)
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Historique",
+    "🔮 Prévisions",
+    "📈 Backtest",
+    "📁 Sources"
+])
 
 # =============================================================================
 # HISTORIQUE
@@ -247,7 +269,7 @@ with tab1:
 
     st.plotly_chart(
         fig,
-        use_container_width=True
+        width="stretch"
     )
 
 # =============================================================================
@@ -284,26 +306,6 @@ with tab2:
         fig.add_trace(
             go.Scatter(
                 x=forecast_df["Date"],
-                y=forecast_df["Upper95"],
-                line=dict(width=0),
-                showlegend=False
-            )
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=forecast_df["Date"],
-                y=forecast_df["Lower95"],
-                fill="tonexty",
-                fillcolor="rgba(255,0,0,0.15)",
-                line=dict(width=0),
-                name="IC 95%"
-            )
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=forecast_df["Date"],
                 y=forecast_df["Prediction"],
                 name="Prévision"
             )
@@ -311,12 +313,12 @@ with tab2:
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
         )
 
         st.dataframe(
             forecast_df,
-            use_container_width=True
+            width="stretch"
         )
 
     except Exception as e:
@@ -346,7 +348,7 @@ with tab3:
 
         st.dataframe(
             bt.tail(50),
-            use_container_width=True
+            width="stretch"
         )
 
     except Exception as e:
@@ -361,18 +363,14 @@ with tab3:
 
 with tab4:
 
-    feuilles = list(
-        workbook.keys()
-    )
-
     feuille = st.selectbox(
         "Choisir une feuille",
-        feuilles
+        list(workbook.keys())
     )
 
     st.dataframe(
         workbook[feuille],
-        use_container_width=True
+        width="stretch"
     )
 
 # =============================================================================
