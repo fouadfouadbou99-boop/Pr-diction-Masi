@@ -2,163 +2,190 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from connectors.loader import load_masi
-
 from models.forecasting import train_model
 from models.backtest import walk_forward_validation
 from models.predict import recursive_forecast
 
-# ==============================================================================
+# =============================================================================
 # CONFIG
-# ==============================================================================
+# =============================================================================
 
 st.set_page_config(
-    page_title="Prévision du MASI",
+    page_title="Prévision MASI",
     page_icon="📈",
     layout="wide"
 )
 
 st.title("📈 Prévision du MASI")
 
-# ==============================================================================
-# CHARGEMENT DES DONNÉES
-# ==============================================================================
+# =============================================================================
+# CHARGEMENT EXCEL MULTI-FEUILLES
+# =============================================================================
 
-@st.cache_data(ttl=3600)
-def get_data():
-    return load_masi()
+@st.cache_data
+def load_excel_model(path):
 
-df = None
+    workbook = {}
 
-with st.spinner("Chargement des données MASI..."):
-    try:
-        df = get_data()
-    except Exception as e:
-        st.warning(f"Erreur chargement automatique : {e}")
+    xls = pd.ExcelFile(path)
 
-# ==============================================================================
-# IMPORT MANUEL SI ÉCHEC
-# ==============================================================================
-
-if df is None or df.empty:
-
-    st.warning("""
-    Impossible de récupérer automatiquement les données MASI.
-
-    Vous pouvez importer un fichier CSV ou Excel contenant :
-
-    - Date
-    - Close
-    """)
-
-    uploaded_file = st.file_uploader(
-        "Importer un historique MASI",
-        type=["csv", "xlsx", "xls"]
-    )
-
-    if uploaded_file is not None:
+    for sheet in xls.sheet_names:
 
         try:
 
-            if uploaded_file.name.lower().endswith(".csv"):
-                df = pd.read_csv(uploaded_file)
-
-            else:
-                df = pd.read_excel(uploaded_file)
-
-            if "Date" not in df.columns:
-                st.error("Colonne Date introuvable")
-                st.stop()
-
-            if "Close" not in df.columns:
-                st.error("Colonne Close introuvable")
-                st.stop()
-
-            df["Date"] = pd.to_datetime(
-                df["Date"],
-                errors="coerce"
+            df = pd.read_excel(
+                xls,
+                sheet_name=sheet
             )
 
-            df["Close"] = pd.to_numeric(
-                df["Close"],
-                errors="coerce"
-            )
+            if "Date" in df.columns:
 
-            df = (
-                df.dropna()
-                .sort_values("Date")
-                .reset_index(drop=True)
-            )
+                df["Date"] = pd.to_datetime(
+                    df["Date"],
+                    errors="coerce"
+                )
+
+            workbook[sheet] = df
 
         except Exception as e:
 
-            st.error(
-                f"Erreur lecture fichier : {e}"
+            st.warning(
+                f"Erreur feuille {sheet}: {e}"
             )
-            st.stop()
 
-    else:
-        st.stop()
+    return workbook
 
-# ==============================================================================
-# VALIDATION
-# ==============================================================================
 
-if len(df) < 100:
+try:
+
+    workbook = load_excel_model(
+        "data/masi_model.xlsx"
+    )
+
+except Exception as e:
 
     st.error(
-        "Historique insuffisant. Au moins 100 observations sont recommandées."
+        f"Impossible de lire data/masi_model.xlsx : {e}"
     )
 
     st.stop()
 
-# ==============================================================================
+# =============================================================================
+# FEUILLE MASI
+# =============================================================================
+
+if "MASI" not in workbook:
+
+    st.error(
+        "Feuille MASI absente"
+    )
+
+    st.stop()
+
+df = workbook["MASI"].copy()
+
+required = ["Date", "Close"]
+
+for col in required:
+
+    if col not in df.columns:
+
+        st.error(
+            f"Colonne obligatoire absente : {col}"
+        )
+
+        st.stop()
+
+df["Close"] = pd.to_numeric(
+    df["Close"],
+    errors="coerce"
+)
+
+df = (
+    df.dropna()
+      .sort_values("Date")
+      .reset_index(drop=True)
+)
+
+# =============================================================================
+# SIDEBAR
+# =============================================================================
+
+st.sidebar.header(
+    "📁 Modèle Excel"
+)
+
+sheet_names = list(
+    workbook.keys()
+)
+
+selected_sheet = st.sidebar.selectbox(
+    "Consulter une feuille",
+    sheet_names
+)
+
+horizon = st.sidebar.slider(
+    "Horizon prévision",
+    1,
+    30,
+    10
+)
+
+# =============================================================================
 # KPI
-# ==============================================================================
+# =============================================================================
 
-last_close = float(df["Close"].iloc[-1])
+last_close = float(
+    df["Close"].iloc[-1]
+)
 
-prev_close = float(df["Close"].iloc[-2])
+prev_close = float(
+    df["Close"].iloc[-2]
+)
 
 variation = (
     (last_close / prev_close) - 1
 ) * 100
 
-ma20 = df["Close"].tail(20).mean()
+ma20 = (
+    df["Close"]
+    .tail(20)
+    .mean()
+)
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-col1.metric(
-    "Dernier Cours",
+c1.metric(
+    "Dernier cours",
     f"{last_close:,.2f}"
 )
 
-col2.metric(
-    "Variation Journalière",
+c2.metric(
+    "Variation",
     f"{variation:.2f}%"
 )
 
-col3.metric(
-    "Moyenne Mobile 20j",
+c3.metric(
+    "MA20",
     f"{ma20:,.2f}"
 )
 
-# ==============================================================================
-# ONGLETS
-# ==============================================================================
+# =============================================================================
+# TABS
+# =============================================================================
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [
         "📊 Historique",
         "🔮 Prévisions",
         "📈 Backtest",
-        "📋 Données"
+        "📁 Sources"
     ]
 )
 
-# ==============================================================================
+# =============================================================================
 # HISTORIQUE
-# ==============================================================================
+# =============================================================================
 
 with tab1:
 
@@ -168,21 +195,13 @@ with tab1:
         go.Scatter(
             x=df["Date"],
             y=df["Close"],
-            mode="lines",
-            name="MASI",
-            line=dict(
-                color="#003366",
-                width=2
-            )
+            name="MASI"
         )
     )
 
     fig.update_layout(
-        title="Historique du MASI",
-        xaxis_title="Date",
-        yaxis_title="Indice",
-        hovermode="x unified",
-        height=600
+        height=600,
+        title="Historique MASI"
     )
 
     st.plotly_chart(
@@ -190,13 +209,15 @@ with tab1:
         use_container_width=True
     )
 
-# ==============================================================================
+# =============================================================================
 # BACKTEST
-# ==============================================================================
+# =============================================================================
 
 with tab3:
 
-    st.subheader("Validation Walk Forward")
+    st.subheader(
+        "Walk Forward Validation"
+    )
 
     try:
 
@@ -204,24 +225,24 @@ with tab3:
             walk_forward_validation(df)
         )
 
-        c1, c2, c3, c4 = st.columns(4)
+        b1, b2, b3, b4 = st.columns(4)
 
-        c1.metric(
+        b1.metric(
             "MAE",
             round(mae, 2)
         )
 
-        c2.metric(
+        b2.metric(
             "RMSE",
             round(rmse, 2)
         )
 
-        c3.metric(
+        b3.metric(
             "R²",
             round(r2, 3)
         )
 
-        c4.metric(
+        b4.metric(
             "Sigma",
             round(sigma, 2)
         )
@@ -242,11 +263,6 @@ with tab3:
             )
         )
 
-        fig_bt.update_layout(
-            title="Backtest Walk Forward",
-            height=600
-        )
-
         st.plotly_chart(
             fig_bt,
             use_container_width=True
@@ -258,20 +274,11 @@ with tab3:
             f"Erreur backtest : {e}"
         )
 
-# ==============================================================================
-# PREVISIONS
-# ==============================================================================
+# =============================================================================
+# PREVISION
+# =============================================================================
 
 with tab2:
-
-    st.subheader("Prévisions")
-
-    horizon = st.slider(
-        "Nombre de séances",
-        min_value=1,
-        max_value=30,
-        value=10
-    )
 
     try:
 
@@ -326,18 +333,15 @@ with tab2:
                 name="Prévision",
                 line=dict(
                     color="red",
-                    width=3,
-                    dash="dash"
+                    dash="dash",
+                    width=3
                 )
             )
         )
 
         fig_pred.update_layout(
-            title="Prévisions MASI",
-            xaxis_title="Date",
-            yaxis_title="Indice",
-            hovermode="x unified",
-            height=650
+            height=650,
+            title="Prévision MASI"
         )
 
         st.plotly_chart(
@@ -363,33 +367,42 @@ with tab2:
             f"Erreur prévision : {e}"
         )
 
-# ==============================================================================
-# DONNÉES
-# ==============================================================================
+# =============================================================================
+# SOURCES EXCEL
+# =============================================================================
 
 with tab4:
 
+    st.subheader(
+        f"Feuille : {selected_sheet}"
+    )
+
     st.dataframe(
-        df,
+        workbook[selected_sheet],
         use_container_width=True
     )
 
     st.download_button(
-        "📥 Télécharger les données",
-        df.to_csv(index=False),
-        "masi_data.csv",
-        "text/csv"
+        f"Télécharger {selected_sheet}",
+        workbook[selected_sheet].to_csv(index=False),
+        file_name=f"{selected_sheet}.csv",
+        mime="text/csv"
     )
 
-# ==============================================================================
+# =============================================================================
 # FOOTER
-# ==============================================================================
+# =============================================================================
 
 st.caption(
     """
-    Les prévisions reposent sur un modèle d'apprentissage automatique
-    validé par Walk-Forward Backtesting.
-
-    Elles ne constituent pas un conseil d'investissement.
+    Modèle de prévision du MASI avec :
+    
+    • Validation Walk-Forward
+    • Intervalles de confiance 95 %
+    • Prévision récursive
+    • Données Excel multi-feuilles
+    
+    Les prévisions sont indicatives et ne constituent pas
+    un conseil d'investissement.
     """
 )
