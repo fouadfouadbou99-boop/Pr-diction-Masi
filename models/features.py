@@ -2,42 +2,86 @@ import pandas as pd
 import numpy as np
 
 
-def compute_rsi(close, period=14):
+def compute_rsi(series, period=14):
 
-    delta = close.diff()
+    delta = series.diff()
 
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
+    gain = delta.clip(lower=0)
+
+    loss = -delta.clip(upper=0)
 
     avg_gain = gain.rolling(period).mean()
+
     avg_loss = loss.rolling(period).mean()
 
     rs = avg_gain / avg_loss
 
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+
+    return rsi
 
 
 def create_features(df):
 
     data = df.copy()
 
-    data["Return_1"] = data["Close"].pct_change()
+    data = data[["Date", "Close"]].copy()
 
-    data["Return_5"] = data["Close"].pct_change(5)
+    data["Close"] = pd.to_numeric(
+        data["Close"],
+        errors="coerce"
+    )
 
-    data["Return_20"] = data["Close"].pct_change(20)
+    data = data.dropna()
 
-    data["MA5"] = data["Close"].rolling(5).mean()
+    # Rendements
 
-    data["MA20"] = data["Close"].rolling(20).mean()
+    data["Return_1"] = (
+        data["Close"].pct_change()
+    )
 
-    data["MA50"] = data["Close"].rolling(50).mean()
+    data["Return_5"] = (
+        data["Close"].pct_change(5)
+    )
 
-    data["EMA20"] = data["Close"].ewm(span=20).mean()
+    data["Return_20"] = (
+        data["Close"].pct_change(20)
+    )
+
+    # Moyennes mobiles
+
+    data["MA5"] = (
+        data["Close"]
+        .rolling(5)
+        .mean()
+    )
+
+    data["MA20"] = (
+        data["Close"]
+        .rolling(20)
+        .mean()
+    )
+
+    data["MA50"] = (
+        data["Close"]
+        .rolling(50)
+        .mean()
+    )
+
+    data["EMA20"] = (
+        data["Close"]
+        .ewm(span=20, adjust=False)
+        .mean()
+    )
+
+    # Momentum
 
     data["Momentum"] = (
-        data["Close"] - data["Close"].shift(10)
+        data["Close"]
+        - data["Close"].shift(10)
     )
+
+    # Volatilité
 
     data["Volatility"] = (
         data["Return_1"]
@@ -45,13 +89,19 @@ def create_features(df):
         .std()
     )
 
+    # RSI
+
     data["RSI"] = compute_rsi(
         data["Close"]
     )
 
+    # Cible
+
     data["Target"] = (
-        data["Close"]
-        .shift(-1)
+        data["Close"].shift(-1)
     )
 
-    return data.dropna()
+    data = data.dropna()
+
+    return data
+``
