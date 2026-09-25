@@ -6,8 +6,8 @@ def compute_rsi(close, period=14):
 
     delta = close.diff()
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
 
     avg_gain = gain.rolling(period).mean()
     avg_loss = loss.rolling(period).mean()
@@ -33,15 +33,10 @@ def create_features(df):
 
     data["MA50"] = data["Close"].rolling(50).mean()
 
-    data["EMA20"] = (
-        data["Close"]
-        .ewm(span=20)
-        .mean()
-    )
+    data["EMA20"] = data["Close"].ewm(span=20).mean()
 
     data["Momentum"] = (
-        data["Close"]
-        - data["Close"].shift(10)
+        data["Close"] - data["Close"].shift(10)
     )
 
     data["Volatility"] = (
