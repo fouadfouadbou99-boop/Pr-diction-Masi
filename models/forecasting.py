@@ -1,6 +1,3 @@
-import pandas as pd
-import numpy as np
-
 from sklearn.ensemble import (
     HistGradientBoostingRegressor
 )
@@ -28,23 +25,22 @@ def train_model(df):
 
     data = create_features(df)
 
-    split = int(
-        len(data) * 0.80
-    )
+    if len(data) < 50:
+        raise ValueError(
+            "Pas assez de données pour entraîner le modèle."
+        )
 
-    train = data.iloc[:split]
+    X = data[FEATURES]
 
-    X_train = train[FEATURES]
-
-    y_train = train["Target"]
+    y = data["Target"]
 
     model = HistGradientBoostingRegressor(
-        max_iter=500,
+        max_iter=300,
         max_depth=6,
         learning_rate=0.03,
         random_state=42
     )
 
-    model.fit(X_train, y_train)
+    model.fit(X, y)
 
     return model
