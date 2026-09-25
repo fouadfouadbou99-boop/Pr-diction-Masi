@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 from sklearn.ensemble import (
     HistGradientBoostingRegressor
@@ -32,16 +33,13 @@ def train_model(df):
     )
 
     train = data.iloc[:split]
-    test = data.iloc[split:]
 
     X_train = train[FEATURES]
+
     y_train = train["Target"]
 
-    X_test = test[FEATURES]
-    y_test = test["Target"]
-
     model = HistGradientBoostingRegressor(
-        max_iter=400,
+        max_iter=500,
         max_depth=6,
         learning_rate=0.03,
         random_state=42
@@ -49,34 +47,4 @@ def train_model(df):
 
     model.fit(X_train, y_train)
 
-    return (
-        model,
-        X_test,
-        y_test,
-        data
-    )
-
-
-def forecast_next_days(
-    model,
-    data,
-    horizon
-):
-
-    forecasts = []
-
-    current = data.copy()
-
-    for _ in range(horizon):
-
-        row = current.iloc[-1]
-
-        X = pd.DataFrame(
-            [row[FEATURES]]
-        )
-
-        pred = model.predict(X)[0]
-
-        forecasts.append(pred)
-
-    return forecasts
+    return model
