@@ -21,35 +21,91 @@ def compute_rsi(series, period=14):
 
 def create_features(df):
 
-    data = df.copy()
+    try:
 
-    data["Close"] = pd.to_numeric(
-        data["Close"],
-        errors="coerce"
-    )
+        data = df.copy()
 
-    data = data.dropna()
+        if "Close" not in data.columns:
+            raise ValueError(
+                "Colonne Close absente"
+            )
 
-    data["Return_1"] = data["Close"].pct_change()
+        data["Close"] = pd.to_numeric(
+            data["Close"],
+            errors="coerce"
+        )
 
-    data["Return_5"] = data["Close"].pct_change(5)
+        data = data.dropna(
+            subset=["Close"]
+        )
 
-    data["Return_20"] = data["Close"].pct_change(20)
+        data["Return_1"] = (
+            data["Close"].pct_change()
+        )
 
-    data["MA5"] = data["Close"].rolling(5).mean()
+        data["Return_5"] = (
+            data["Close"].pct_change(5)
+        )
 
-    data["MA20"] = data["Close"].rolling(20).mean()
+        data["Return_20"] = (
+            data["Close"].pct_change(20)
+        )
 
-    data["MA50"] = data["Close"].rolling(50).mean()
+        data["MA5"] = (
+            data["Close"]
+            .rolling(5)
+            .mean()
+        )
 
-    data["EMA20"] = (
-        data["Close"]
-        .ewm(span=20, adjust=False)
-        .mean()
-    )
+        data["MA20"] = (
+            data["Close"]
+            .rolling(20)
+            .mean()
+        )
 
-    data["Momentum"] = (
-        data["Close"]
-        - data["Close"].shift(10)
-    )
+        data["MA50"] = (
+            data["Close"]
+            .rolling(50)
+            .mean()
+        )
 
+        data["EMA20"] = (
+            data["Close"]
+            .ewm(
+                span=20,
+                adjust=False
+            )
+            .mean()
+        )
+
+        data["Momentum"] = (
+            data["Close"]
+            - data["Close"].shift(10)
+        )
+
+        data["Volatility"] = (
+            data["Return_1"]
+            .rolling(20)
+            .std()
+        )
+
+        data["RSI"] = compute_rsi(
+            data["Close"]
+        )
+
+        data["Target"] = (
+            data["Close"]
+            .shift(-1)
+        )
+
+        data = data.dropna()
+
+        return data
+
+    except Exception as e:
+
+        print(
+            f"Erreur create_features : {e}"
+        )
+
+        return pd.DataFrame()
