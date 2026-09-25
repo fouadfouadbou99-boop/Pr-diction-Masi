@@ -8,97 +8,159 @@ from models.forecasting import train_model
 from models.backtest import walk_forward_validation
 from models.predict import recursive_forecast
 
-
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # CONFIG
-# ------------------------------------------------------------------------------
+# ==============================================================================
 
 st.set_page_config(
-    page_title="Prévision MASI",
+    page_title="Prévision du MASI",
     page_icon="📈",
     layout="wide"
 )
 
 st.title("📈 Prévision du MASI")
 
-
-# ------------------------------------------------------------------------------
-# CHARGEMENT
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# CHARGEMENT DES DONNÉES
+# ==============================================================================
 
 @st.cache_data(ttl=3600)
 def get_data():
     return load_masi()
 
+df = None
 
 with st.spinner("Chargement des données MASI..."):
-    df = get_data()
+    try:
+        df = get_data()
+    except Exception as e:
+        st.warning(f"Erreur chargement automatique : {e}")
+
+# ==============================================================================
+# IMPORT MANUEL SI ÉCHEC
+# ==============================================================================
 
 if df is None or df.empty:
-    st.error("Impossible de charger les données MASI.")
+
+    st.warning("""
+    Impossible de récupérer automatiquement les données MASI.
+
+    Vous pouvez importer un fichier CSV ou Excel contenant :
+
+    - Date
+    - Close
+    """)
+
+    uploaded_file = st.file_uploader(
+        "Importer un historique MASI",
+        type=["csv", "xlsx", "xls"]
+    )
+
+    if uploaded_file is not None:
+
+        try:
+
+            if uploaded_file.name.lower().endswith(".csv"):
+                df = pd.read_csv(uploaded_file)
+
+            else:
+                df = pd.read_excel(uploaded_file)
+
+            if "Date" not in df.columns:
+                st.error("Colonne Date introuvable")
+                st.stop()
+
+            if "Close" not in df.columns:
+                st.error("Colonne Close introuvable")
+                st.stop()
+
+            df["Date"] = pd.to_datetime(
+                df["Date"],
+                errors="coerce"
+            )
+
+            df["Close"] = pd.to_numeric(
+                df["Close"],
+                errors="coerce"
+            )
+
+            df = (
+                df.dropna()
+                .sort_values("Date")
+                .reset_index(drop=True)
+            )
+
+        except Exception as e:
+
+            st.error(
+                f"Erreur lecture fichier : {e}"
+            )
+            st.stop()
+
+    else:
+        st.stop()
+
+# ==============================================================================
+# VALIDATION
+# ==============================================================================
+
+if len(df) < 100:
+
+    st.error(
+        "Historique insuffisant. Au moins 100 observations sont recommandées."
+    )
+
     st.stop()
 
-df["Date"] = pd.to_datetime(df["Date"])
-
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # KPI
-# ------------------------------------------------------------------------------
+# ==============================================================================
 
-last_close = df["Close"].iloc[-1]
+last_close = float(df["Close"].iloc[-1])
 
-previous_close = (
-    df["Close"].iloc[-2]
-    if len(df) > 1
-    else last_close
-)
+prev_close = float(df["Close"].iloc[-2])
 
 variation = (
-    (last_close / previous_close) - 1
+    (last_close / prev_close) - 1
 ) * 100
 
-ma20 = (
-    df["Close"]
-    .tail(20)
-    .mean()
-)
+ma20 = df["Close"].tail(20).mean()
 
 col1, col2, col3 = st.columns(3)
 
 col1.metric(
-    "Dernier cours",
+    "Dernier Cours",
     f"{last_close:,.2f}"
 )
 
 col2.metric(
-    "Variation",
+    "Variation Journalière",
     f"{variation:.2f}%"
 )
 
 col3.metric(
-    "MA20",
+    "Moyenne Mobile 20j",
     f"{ma20:,.2f}"
 )
 
-# ------------------------------------------------------------------------------
-# TABS
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# ONGLETS
+# ==============================================================================
 
 tab1, tab2, tab3, tab4 = st.tabs(
     [
         "📊 Historique",
-        "🤖 Prévision",
+        "🔮 Prévisions",
         "📈 Backtest",
         "📋 Données"
     ]
 )
 
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # HISTORIQUE
-# ------------------------------------------------------------------------------
+# ==============================================================================
 
 with tab1:
-
-    st.subheader("Historique du MASI")
 
     fig = go.Figure()
 
@@ -116,10 +178,11 @@ with tab1:
     )
 
     fig.update_layout(
-        height=600,
-        hovermode="x unified",
+        title="Historique du MASI",
         xaxis_title="Date",
-        yaxis_title="Indice"
+        yaxis_title="Indice",
+        hovermode="x unified",
+        height=600
     )
 
     st.plotly_chart(
@@ -127,204 +190,184 @@ with tab1:
         use_container_width=True
     )
 
-# ------------------------------------------------------------------------------
-# PREVISIONS
-# ------------------------------------------------------------------------------
-
-with tab2:
-
-    st.subheader("Prévision Walk Forward")
-
-    horizon = st.slider(
-        "Nombre de séances à prévoir",
-        min_value=1,
-        max_value=30,
-        value=10
-    )
-
-    with st.spinner("Validation du modèle..."):
-
-        bt, mae, rmse, r2, sigma = (
-            walk_forward_validation(df)
-        )
-
-    model = train_model(df)
-
-    forecast_df = recursive_forecast(
-        model=model,
-        df=df,
-        horizon=horizon,
-        sigma=sigma
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric(
-        "MAE",
-        round(mae, 2)
-    )
-
-    c2.metric(
-        "RMSE",
-        round(rmse, 2)
-    )
-
-    c3.metric(
-        "R²",
-        round(r2, 3)
-    )
-
-    c4.metric(
-        "σ erreurs",
-        round(sigma, 2)
-    )
-
-    fig_pred = go.Figure()
-
-    # historique
-
-    fig_pred.add_trace(
-        go.Scatter(
-            x=df["Date"],
-            y=df["Close"],
-            name="Historique",
-            line=dict(color="blue")
-        )
-    )
-
-    # borne haute
-
-    fig_pred.add_trace(
-        go.Scatter(
-            x=forecast_df["Date"],
-            y=forecast_df["Upper95"],
-            line=dict(width=0),
-            showlegend=False
-        )
-    )
-
-    # borne basse
-
-    fig_pred.add_trace(
-        go.Scatter(
-            x=forecast_df["Date"],
-            y=forecast_df["Lower95"],
-            fill="tonexty",
-            fillcolor="rgba(255,0,0,0.15)",
-            line=dict(width=0),
-            name="IC 95%"
-        )
-    )
-
-    # prévision
-
-    fig_pred.add_trace(
-        go.Scatter(
-            x=forecast_df["Date"],
-            y=forecast_df["Prediction"],
-            name="Prévision",
-            line=dict(
-                color="red",
-                width=3,
-                dash="dash"
-            )
-        )
-    )
-
-    fig_pred.update_layout(
-        height=650,
-        hovermode="x unified",
-        xaxis_title="Date",
-        yaxis_title="Indice MASI"
-    )
-
-    st.plotly_chart(
-        fig_pred,
-        use_container_width=True
-    )
-
-    st.dataframe(
-        forecast_df,
-        use_container_width=True
-    )
-
-    st.download_button(
-        label="📥 Télécharger les prévisions",
-        data=forecast_df.to_csv(index=False),
-        file_name="previsions_masi.csv",
-        mime="text/csv"
-    )
-
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # BACKTEST
-# ------------------------------------------------------------------------------
+# ==============================================================================
 
 with tab3:
 
     st.subheader("Validation Walk Forward")
 
-    bt, mae, rmse, r2, sigma = (
-        walk_forward_validation(df)
-    )
+    try:
 
-    fig_bt = go.Figure()
-
-    fig_bt.add_trace(
-        go.Scatter(
-            y=bt["Actual"],
-            name="Réel",
-            line=dict(color="green")
+        bt, mae, rmse, r2, sigma = (
+            walk_forward_validation(df)
         )
-    )
 
-    fig_bt.add_trace(
-        go.Scatter(
-            y=bt["Forecast"],
-            name="Prévision",
-            line=dict(color="orange")
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric(
+            "MAE",
+            round(mae, 2)
         )
+
+        c2.metric(
+            "RMSE",
+            round(rmse, 2)
+        )
+
+        c3.metric(
+            "R²",
+            round(r2, 3)
+        )
+
+        c4.metric(
+            "Sigma",
+            round(sigma, 2)
+        )
+
+        fig_bt = go.Figure()
+
+        fig_bt.add_trace(
+            go.Scatter(
+                y=bt["Actual"],
+                name="Réel"
+            )
+        )
+
+        fig_bt.add_trace(
+            go.Scatter(
+                y=bt["Forecast"],
+                name="Prévision"
+            )
+        )
+
+        fig_bt.update_layout(
+            title="Backtest Walk Forward",
+            height=600
+        )
+
+        st.plotly_chart(
+            fig_bt,
+            use_container_width=True
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Erreur backtest : {e}"
+        )
+
+# ==============================================================================
+# PREVISIONS
+# ==============================================================================
+
+with tab2:
+
+    st.subheader("Prévisions")
+
+    horizon = st.slider(
+        "Nombre de séances",
+        min_value=1,
+        max_value=30,
+        value=10
     )
 
-    fig_bt.update_layout(
-        height=600,
-        hovermode="x unified"
-    )
+    try:
 
-    st.plotly_chart(
-        fig_bt,
-        use_container_width=True
-    )
+        bt, mae, rmse, r2, sigma = (
+            walk_forward_validation(df)
+        )
 
-    residuals = (
-        bt["Actual"]
-        - bt["Forecast"]
-    )
+        model = train_model(df)
 
-    st.write("### Distribution des erreurs")
+        forecast_df = recursive_forecast(
+            model=model,
+            df=df,
+            horizon=horizon,
+            sigma=sigma
+        )
 
-    st.line_chart(
-        residuals
-    )
+        fig_pred = go.Figure()
 
-    st.write(
-        f"""
-        **MAE :** {mae:.2f}
+        fig_pred.add_trace(
+            go.Scatter(
+                x=df["Date"],
+                y=df["Close"],
+                name="Historique",
+                line=dict(color="blue")
+            )
+        )
 
-        **RMSE :** {rmse:.2f}
+        fig_pred.add_trace(
+            go.Scatter(
+                x=forecast_df["Date"],
+                y=forecast_df["Upper95"],
+                line=dict(width=0),
+                showlegend=False
+            )
+        )
 
-        **R² :** {r2:.3f}
+        fig_pred.add_trace(
+            go.Scatter(
+                x=forecast_df["Date"],
+                y=forecast_df["Lower95"],
+                fill="tonexty",
+                fillcolor="rgba(255,0,0,0.15)",
+                line=dict(width=0),
+                name="IC 95%"
+            )
+        )
 
-        **Écart-type des erreurs :** {sigma:.2f}
-        """
-    )
+        fig_pred.add_trace(
+            go.Scatter(
+                x=forecast_df["Date"],
+                y=forecast_df["Prediction"],
+                name="Prévision",
+                line=dict(
+                    color="red",
+                    width=3,
+                    dash="dash"
+                )
+            )
+        )
 
-# ------------------------------------------------------------------------------
-# DONNEES
-# ------------------------------------------------------------------------------
+        fig_pred.update_layout(
+            title="Prévisions MASI",
+            xaxis_title="Date",
+            yaxis_title="Indice",
+            hovermode="x unified",
+            height=650
+        )
+
+        st.plotly_chart(
+            fig_pred,
+            use_container_width=True
+        )
+
+        st.dataframe(
+            forecast_df,
+            use_container_width=True
+        )
+
+        st.download_button(
+            "📥 Télécharger les prévisions",
+            forecast_df.to_csv(index=False),
+            "previsions_masi.csv",
+            "text/csv"
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Erreur prévision : {e}"
+        )
+
+# ==============================================================================
+# DONNÉES
+# ==============================================================================
 
 with tab4:
-
-    st.subheader("Données utilisées")
 
     st.dataframe(
         df,
@@ -334,18 +377,19 @@ with tab4:
     st.download_button(
         "📥 Télécharger les données",
         df.to_csv(index=False),
-        file_name="masi_data.csv",
-        mime="text/csv"
+        "masi_data.csv",
+        "text/csv"
     )
 
-# ------------------------------------------------------------------------------
+# ==============================================================================
 # FOOTER
-# ------------------------------------------------------------------------------
+# ==============================================================================
 
 st.caption(
     """
-    Les prévisions sont probabilistes et reposent sur un modèle
-    d'apprentissage automatique avec validation temporelle Walk Forward.
+    Les prévisions reposent sur un modèle d'apprentissage automatique
+    validé par Walk-Forward Backtesting.
+
     Elles ne constituent pas un conseil d'investissement.
     """
 )
