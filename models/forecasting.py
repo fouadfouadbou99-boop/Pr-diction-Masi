@@ -1,10 +1,7 @@
-from sklearn.ensemble import (
-    HistGradientBoostingRegressor
-)
+from sklearn.ensemble import HistGradientBoostingRegressor
 
-from models.features import (
-    create_features
-)
+from models.features import create_features
+
 
 FEATURES = [
     "Close",
@@ -17,13 +14,7 @@ FEATURES = [
     "EMA20",
     "Momentum",
     "RSI",
-    "Volatility",
-
-    "Taux_Directeur",
-    "USDMAD",
-    "EURMAD",
-    "CAC40",
-    "SP500"
+    "Volatility"
 ]
 
 
@@ -31,25 +22,18 @@ def train_model(df):
 
     data = create_features(df)
 
-    features_used = [
-        c for c in FEATURES
-        if c in data.columns
-    ]
-
-    if len(data) < 50:
-
+    if data.empty:
         raise ValueError(
-            "Pas assez de données."
+            "Aucune donnée exploitable."
         )
 
-    X = data[features_used]
+    X = data[FEATURES]
 
     y = data["Target"]
 
     model = HistGradientBoostingRegressor(
-        max_iter=300,
+        max_iter=200,
         max_depth=6,
-        learning_rate=0.03,
         random_state=42
     )
 
