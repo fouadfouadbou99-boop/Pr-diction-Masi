@@ -31,18 +31,13 @@ def recursive_forecast(
         if feat.empty:
 
             raise ValueError(
-                "Impossible de calculer les indicateurs."
+                "Impossible de créer les indicateurs."
             )
-
-        available = [
-            c for c in FEATURES
-            if c in feat.columns
-        ]
 
         row = feat.iloc[-1]
 
         X = pd.DataFrame(
-            [row[available]]
+            [row[FEATURES]]
         )
 
         prediction = model.predict(X)[0]
