@@ -31,51 +31,122 @@ def load_excel_model(file):
 
     for sheet in xls.sheet_names:
 
-        try:
+        df = pd.read_excel(
+            xls,
+            sheet_name=sheet
+        )
 
-            workbook[sheet] = pd.read_excel(
-                xls,
-                sheet_name=sheet
-            )
-
-        except Exception:
-            pass
+        workbook[sheet] = df
 
     return workbook
 
-st.sidebar.header("📂 Données")
+
+# =============================================================================
+# FUSION MACRO
+# =============================================================================
+
+def build_dataset(workbook):
+
+    if "MASI" not in workbook:
+        raise ValueError(
+            "Feuille MASI absente"
+        )
+
+    df = workbook["MASI"].copy()
+
+    df["Date"] = pd.to_datetime(df["Date"])
+
+    # BAM
+
+    if "BAM" in workbook:
+
+        bam = workbook["BAM"].copy()
+
+        bam["Date"] = pd.to_datetime(
+            bam["Date"]
+        )
+
+        df = df.merge(
+            bam,
+            on="Date",
+            how="left"
+        )
+
+    # CHANGE
+
+    if "CHANGE" in workbook:
+
+        change = workbook["CHANGE"].copy()
+
+        change["Date"] = pd.to_datetime(
+            change["Date"]
+        )
+
+        df = df.merge(
+            change,
+            on="Date",
+            how="left"
+        )
+
+    # MARCHES
+
+    if "MARCHES" in workbook:
+
+        marches = workbook["MARCHES"].copy()
+
+        marches["Date"] = pd.to_datetime(
+            marches["Date"]
+        )
+
+        df = df.merge(
+            marches,
+            on="Date",
+            how="left"
+        )
+
+    df = (
+        df.sort_values("Date")
+          .ffill()
+          .bfill()
+          .reset_index(drop=True)
+    )
+
+    return df
+
+
+# =============================================================================
+# SIDEBAR
+# =============================================================================
+
+st.sidebar.header(
+    "📂 Données"
+)
 
 uploaded_file = st.sidebar.file_uploader(
     "Importer un fichier Excel",
     type=["xlsx", "xls"]
 )
 
-workbook = {}
-
-if uploaded_file is not None:
-
-    workbook = load_excel_model(
-        uploaded_file
-    )
-
-    st.sidebar.success(
-        "Fichier Excel chargé"
-    )
-
-else:
+if uploaded_file is None:
 
     st.warning(
         """
-        Importez un fichier Excel contenant :
+        Chargez un fichier Excel.
 
-        Date | Close
+        Feuilles recommandées :
 
-        dans une feuille appelée MASI
-        ou dans la première feuille.
+        • MASI
+        • BAM
+        • CHANGE
+        • MARCHES
         """
     )
 
     st.stop()
+
+workbook = load_excel_model(
+    uploaded_file
+)
 
 # =============================================================================
 # FEUILLES
@@ -92,45 +163,35 @@ for sheet in workbook.keys():
     )
 
 # =============================================================================
-# CHOIX FEUILLE
+# DATASET FUSIONNE
 # =============================================================================
 
-if "MASI" in workbook:
+try:
 
-    df = workbook["MASI"].copy()
-
-else:
-
-    sheet_name = list(
-        workbook.keys()
-    )[0]
-
-    st.warning(
-        f"Utilisation de : {sheet_name}"
+    df = build_dataset(
+        workbook
     )
 
-    df = workbook[sheet_name].copy()
+except Exception as e:
+
+    st.exception(e)
+
+    st.stop()
 
 # =============================================================================
-# NORMALISATION COLONNES
+# NORMALISATION
 # =============================================================================
 
 rename_map = {
 
     "DATE": "Date",
     "date": "Date",
-    "Séance": "Date",
-    "SEANCE": "Date",
 
-    "Close": "Close",
-    "CLOSE": "Close",
     "Clôture": "Close",
     "CLOTURE": "Close",
     "Cours": "Close",
     "COURS": "Close",
     "Prix": "Close",
-    "PRIX": "Close",
-    "Valeur": "Close",
     "VALEUR": "Close"
 }
 
@@ -139,65 +200,22 @@ df.rename(
     inplace=True
 )
 
-st.sidebar.subheader(
-    "Colonnes détectées"
-)
-
-st.sidebar.write(
-    list(df.columns)
-)
-
-# =============================================================================
-# VALIDATION
-# =============================================================================
-
-if "Date" not in df.columns:
-
-    st.error(
-        "Colonne Date introuvable."
-    )
-
-    st.stop()
-
 if "Close" not in df.columns:
 
     st.error(
-        "Colonne Close introuvable."
+        "Colonne Close absente."
     )
 
     st.stop()
-
-df["Date"] = pd.to_datetime(
-    df["Date"],
-    errors="coerce"
-)
 
 df["Close"] = pd.to_numeric(
     df["Close"],
     errors="coerce"
 )
 
-df = (
-    df.dropna()
-      .sort_values("Date")
-      .reset_index(drop=True)
+df = df.dropna(
+    subset=["Close"]
 )
-
-if len(df) < 80:
-
-    st.error(
-        f"""
-        Historique insuffisant.
-
-        Nombre de lignes :
-        {len(df)}
-
-        Minimum recommandé :
-        80
-        """
-    )
-
-    st.stop()
 
 # =============================================================================
 # KPI
@@ -212,9 +230,7 @@ prev_close = float(
 )
 
 variation = (
-    (
-        last_close / prev_close
-    ) - 1
+    (last_close / prev_close) - 1
 ) * 100
 
 ma20 = (
@@ -354,6 +370,13 @@ with tab2:
             width="stretch"
         )
 
+        st.download_button(
+            "📥 Télécharger les prévisions",
+            forecast_df.to_csv(index=False),
+            "previsions_masi.csv",
+            "text/csv"
+        )
+
     except Exception as e:
 
         st.exception(e)
@@ -372,24 +395,30 @@ with tab3:
 
         a, b, c, d = st.columns(4)
 
-        a.metric(
-            "MAE",
-            f"{mae:.2f}"
+        a.metric("MAE", round(mae, 2))
+        b.metric("RMSE", round(rmse, 2))
+        c.metric("R²", round(r2, 3))
+        d.metric("Sigma", round(sigma, 2))
+
+        fig_bt = go.Figure()
+
+        fig_bt.add_trace(
+            go.Scatter(
+                y=bt["Actual"],
+                name="Réel"
+            )
         )
 
-        b.metric(
-            "RMSE",
-            f"{rmse:.2f}"
+        fig_bt.add_trace(
+            go.Scatter(
+                y=bt["Forecast"],
+                name="Prévision"
+            )
         )
 
-        c.metric(
-            "R²",
-            f"{r2:.3f}"
-        )
-
-        d.metric(
-            "Sigma",
-            f"{sigma:.2f}"
+        st.plotly_chart(
+            fig_bt,
+            width="stretch"
         )
 
         st.dataframe(
@@ -424,14 +453,7 @@ with tab4:
 st.caption(
     """
     Prévisions indicatives.
-
-    Modèle :
-    HistGradientBoostingRegressor
-
-    Validation :
-    Walk Forward Backtesting
-
-    Les résultats ne constituent pas
-    un conseil d'investissement.
+    Modèle : HistGradientBoostingRegressor.
+    Validation : Walk Forward Backtesting.
     """
 )
