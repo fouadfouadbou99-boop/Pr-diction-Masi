@@ -2,8 +2,8 @@ streamlit==1.64.0
 pandas
 numpy
 plotly==6.3.0
-scikit-learn
-openpyxl
 requests
 lxml
+openpyxl
 beautifulsoup4
+scikit-learn
