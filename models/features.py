@@ -3,7 +3,6 @@ import numpy as np
 
 
 def compute_rsi(series, period=14):
-
     delta = series.diff()
 
     gain = delta.clip(lower=0)
@@ -34,21 +33,11 @@ def create_features(df):
 
     data = data.dropna()
 
-    # Rendements
+    data["Return_1"] = data["Close"].pct_change()
 
-    data["Return_1"] = (
-        data["Close"].pct_change()
-    )
+    data["Return_5"] = data["Close"].pct_change(5)
 
-    data["Return_5"] = (
-        data["Close"].pct_change(5)
-    )
-
-    data["Return_20"] = (
-        data["Close"].pct_change(20)
-    )
-
-    # Moyennes mobiles
+    data["Return_20"] = data["Close"].pct_change(20)
 
     data["MA5"] = (
         data["Close"]
@@ -74,14 +63,10 @@ def create_features(df):
         .mean()
     )
 
-    # Momentum
-
     data["Momentum"] = (
         data["Close"]
         - data["Close"].shift(10)
     )
-
-    # Volatilité
 
     data["Volatility"] = (
         data["Return_1"]
@@ -89,19 +74,15 @@ def create_features(df):
         .std()
     )
 
-    # RSI
-
     data["RSI"] = compute_rsi(
         data["Close"]
     )
 
-    # Cible
-
     data["Target"] = (
-        data["Close"].shift(-1)
+        data["Close"]
+        .shift(-1)
     )
 
     data = data.dropna()
 
     return data
-``
