@@ -24,20 +24,25 @@ def recursive_forecast(
 
     for i in range(horizon):
 
-        feature_df = create_features(
+        feat = create_features(
             history
         )
 
-        if feature_df.empty:
+        if feat.empty:
 
             raise ValueError(
                 "Impossible de calculer les indicateurs."
             )
 
-        row = feature_df.iloc[-1]
+        available = [
+            c for c in FEATURES
+            if c in feat.columns
+        ]
+
+        row = feat.iloc[-1]
 
         X = pd.DataFrame(
-            [row[FEATURES]]
+            [row[available]]
         )
 
         prediction = model.predict(X)[0]
