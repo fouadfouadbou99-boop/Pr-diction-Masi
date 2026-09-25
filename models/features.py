@@ -26,55 +26,30 @@ def create_features(df):
         data = df.copy()
 
         if "Close" not in data.columns:
-            raise ValueError(
-                "Colonne Close absente"
-            )
+            return pd.DataFrame()
 
         data["Close"] = pd.to_numeric(
             data["Close"],
             errors="coerce"
         )
 
-        data = data.dropna(
-            subset=["Close"]
-        )
+        data = data.dropna(subset=["Close"])
 
-        data["Return_1"] = (
-            data["Close"].pct_change()
-        )
+        data["Return_1"] = data["Close"].pct_change()
 
-        data["Return_5"] = (
-            data["Close"].pct_change(5)
-        )
+        data["Return_5"] = data["Close"].pct_change(5)
 
-        data["Return_20"] = (
-            data["Close"].pct_change(20)
-        )
+        data["Return_20"] = data["Close"].pct_change(20)
 
-        data["MA5"] = (
-            data["Close"]
-            .rolling(5)
-            .mean()
-        )
+        data["MA5"] = data["Close"].rolling(5).mean()
 
-        data["MA20"] = (
-            data["Close"]
-            .rolling(20)
-            .mean()
-        )
+        data["MA20"] = data["Close"].rolling(20).mean()
 
-        data["MA50"] = (
-            data["Close"]
-            .rolling(50)
-            .mean()
-        )
+        data["MA50"] = data["Close"].rolling(50).mean()
 
         data["EMA20"] = (
             data["Close"]
-            .ewm(
-                span=20,
-                adjust=False
-            )
+            .ewm(span=20, adjust=False)
             .mean()
         )
 
