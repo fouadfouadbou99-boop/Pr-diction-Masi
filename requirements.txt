@@ -1,10 +1,9 @@
-streamlit
+streamlit==1.64.0
 pandas
 numpy
+plotly==6.3.0
 scikit-learn
-plotly
-yfinance
-requests
-beautifulsoup4
-lxml
 openpyxl
+requests
+lxml
+beautifulsoup4
