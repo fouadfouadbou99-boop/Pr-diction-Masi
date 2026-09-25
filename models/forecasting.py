@@ -17,7 +17,13 @@ FEATURES = [
     "EMA20",
     "Momentum",
     "RSI",
-    "Volatility"
+    "Volatility",
+
+    "Taux_Directeur",
+    "USDMAD",
+    "EURMAD",
+    "CAC40",
+    "SP500"
 ]
 
 
@@ -25,12 +31,18 @@ def train_model(df):
 
     data = create_features(df)
 
+    features_used = [
+        c for c in FEATURES
+        if c in data.columns
+    ]
+
     if len(data) < 50:
+
         raise ValueError(
-            "Pas assez de données pour entraîner le modèle."
+            "Pas assez de données."
         )
 
-    X = data[FEATURES]
+    X = data[features_used]
 
     y = data["Target"]
 
