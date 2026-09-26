@@ -376,7 +376,65 @@ with tab2:
             "previsions_masi.csv",
             "text/csv"
         )
+        # ============================================================
+        # COMMENTAIRE AUTOMATIQUE A L'ATTENTION DU COMITE
+        # ============================================================
 
+        last_pred = forecast_df["Prediction"].iloc[-1]
+
+        lower95 = forecast_df["Lower95"].iloc[-1]
+
+        upper95 = forecast_df["Upper95"].iloc[-1]
+
+        variation_proj = (
+            (last_pred / last_close) - 1
+        ) * 100
+
+        if variation_proj > 2:
+
+            orientation = "une orientation haussière"
+
+        elif variation_proj < -2:
+
+            orientation = "une orientation baissière"
+
+        else:
+
+            orientation = "une évolution globalement stable"
+
+        commentaire = f"""
+### 📝 Commentaire automatique à l'attention du Comité
+
+Sur la base des informations historiques actuellement disponibles, le modèle anticipe **{orientation}** du MASI sur un horizon de **{horizon} séances de bourse**.
+
+Le dernier cours observé s'établit à **{last_close:,.2f} points**.
+
+La projection centrale du modèle ressort à **{last_pred:,.2f} points**, soit une variation estimée de **{variation_proj:.2f}%** par rapport au dernier niveau observé.
+
+L'intervalle de confiance à 95 % situe le MASI dans une fourchette comprise entre **{lower95:,.2f} points** et **{upper95:,.2f} points**.
+
+Le scénario prudent correspond à **{lower95:,.2f} points**.
+
+Le scénario central correspond à **{last_pred:,.2f} points**.
+
+Le scénario favorable correspond à **{upper95:,.2f} points**.
+
+Les performances observées lors du Walk Forward Backtesting demeurent satisfaisantes avec :
+
+- **R² = {r2:.3f}**
+- **MAE = {mae:.1f} points**
+- **RMSE = {rmse:.1f} points**
+
+L'intervalle de confiance est calculé selon la formule :
+
+**IC95 % = Prévision ± 1,96 × Sigma**
+
+Le coefficient **1,96** provient de la loi normale. Les statisticiens ont démontré qu'environ 95 % des observations se situent entre **−1,96 Sigma** et **+1,96 Sigma** autour de leur moyenne. Ce coefficient permet donc de construire une plage de valeurs couvrant environ 95 % des scénarios statistiquement plausibles.
+
+Cette analyse constitue un outil d'aide à la décision. Les résultats doivent être interprétés comme des scénarios probabilistes et non comme une prévision certaine de l'évolution future du marché.
+"""
+
+        st.info(commentaire)
     except Exception as e:
 
         st.exception(e)
