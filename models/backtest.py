@@ -35,17 +35,16 @@ def walk_forward_validation(df):
     data = create_features(df)
 
     if data.empty:
-
         raise ValueError(
             "Pas assez de données après création des indicateurs."
         )
 
     if len(data) < 30:
-
         raise ValueError(
             f"Seulement {len(data)} lignes disponibles."
         )
 
+    dates = []
     actuals = []
     forecasts = []
 
@@ -57,7 +56,6 @@ def walk_forward_validation(df):
     for i in range(start, len(data) - 1):
 
         train = data.iloc[:i]
-
         test = data.iloc[i:i + 1]
 
         model = HistGradientBoostingRegressor(
@@ -74,6 +72,10 @@ def walk_forward_validation(df):
             test[FEATURES]
         )[0]
 
+        dates.append(
+            test["Date"].iloc[0]
+        )
+
         actuals.append(
             float(
                 test["Target"].iloc[0]
@@ -86,6 +88,7 @@ def walk_forward_validation(df):
 
     bt = pd.DataFrame(
         {
+            "Date": dates,
             "Actual": actuals,
             "Forecast": forecasts
         }
