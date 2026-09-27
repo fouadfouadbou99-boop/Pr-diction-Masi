@@ -442,9 +442,7 @@ Cette analyse constitue un outil d'aide à la décision. Les résultats doivent 
 # =============================================================================
 # BACKTEST
 # =============================================================================
-
 with tab3:
-
     try:
 
         bt, mae, rmse, r2, sigma = (
@@ -462,16 +460,27 @@ with tab3:
 
         fig_bt.add_trace(
             go.Scatter(
+                x=bt["Date"],
                 y=bt["Actual"],
-                name="Réel"
+                name="Réel",
+                mode="lines"
             )
         )
 
         fig_bt.add_trace(
             go.Scatter(
+                x=bt["Date"],
                 y=bt["Forecast"],
-                name="Prévision"
+                name="Prévision",
+                mode="lines"
             )
+        )
+
+        fig_bt.update_layout(
+            title="Backtest : Réel vs Prévision",
+            xaxis_title="Date",
+            yaxis_title="Valeur du MASI",
+            hovermode="x unified"
         )
 
         st.plotly_chart(
@@ -485,9 +494,7 @@ with tab3:
         )
 
     except Exception as e:
-
         st.exception(e)
-
 # =============================================================================
 # SOURCES
 # =============================================================================
